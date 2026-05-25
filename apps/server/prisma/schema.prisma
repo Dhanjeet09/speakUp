@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum EnglishLevel {
+  A1
+  A2
+  B1
+  B2
+  C1
+  C2
+}
+
+enum ReportReason {
+  inappropriate_language
+  harassment
+  spam
+  other
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  country        String?
+  avatarUrl      String?
+  englishLevel   EnglishLevel?
+  interests      String[]
+  createdAt      DateTime  @default(now())
+  totalMinutes   Int       @default(0)
+  totalSessions  Int       @default(0)
+  currentStreak  Int       @default(0)
+  lastSessionDate DateTime?
+
+  sessionsAsUser1 Session[] @relation("User1Sessions")
+  sessionsAsUser2 Session[] @relation("User2Sessions")
+  blocksMade      Block[]   @relation("BlockerBlocks")
+  blocksReceived  Block[]   @relation("BlockedBlocks")
+  reportsMade     Report[]  @relation("ReporterReports")
+  reportsReceived Report[]  @relation("ReportedReports")
+
+  @@index([email])
+  @@index([englishLevel])
+}
+
+model Session {
+  id              String      @id @default(cuid())
+  createdAt       DateTime    @default(now())
+  durationSeconds Int         @default(0)
+  user1Id         String
+  user2Id         String
+  topicUsed       String?
+  user1Rating     Boolean?
+  user2Rating     Boolean?
+  roomUrl         String?
+
+  user1 User @relation("User1Sessions", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2 User @relation("User2Sessions", fields: [user2Id], references: [id], onDelete: Cascade)
+
+  @@index([user1Id, createdAt])
+  @@index([user2Id, createdAt])
+  @@index([createdAt])
+}
+
+model Block {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("BlockerBlocks", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("BlockedBlocks", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+model Report {
+  id         String       @id @default(cuid())
+  reporterId String
+  reportedId String
+  reason     ReportReason
+  note       String?
+  createdAt  DateTime     @default(now())
+  resolved   Boolean      @default(false)
+
+  reporter User @relation("ReporterReports", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User @relation("ReportedReports", fields: [reportedId], references: [id], onDelete: Cascade)
+
+  @@index([resolved, createdAt])
+  @@index([reportedId])
+}

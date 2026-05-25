@@ -1,0 +1,290 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/useAuthStore";
+import { useMatchStore } from "@/store/useMatchStore";
+import { useCallStore } from "@/store/useCallStore";
+import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
+import { getTodaysTopic } from "@/lib/topics";
+import { createSession } from "@/lib/api/sessions";
+import { getSupabase } from "@/lib/supabase";
+import Navbar from "@/components/layout/Navbar";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import toast from "react-hot-toast";
+
+const VideoCall = dynamic(() => import("@/components/call/VideoCall"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex aspect-video w-full items-center justify-center rounded-card bg-gray-100 text-gray-400">
+      Loading video call...
+    </div>
+  ),
+});
+
+export default function MatchPage() {
+  const router = useRouter();
+  const { user, profile } = useAuthStore();
+  const {
+    state,
+    partner,
+    roomId,
+    topic,
+    isCaller,
+    waitingCount,
+    setState,
+    setPartner,
+    setRoomId,
+    setTopic,
+    setIsCaller,
+    setWaitingCount,
+    reset,
+  } = useMatchStore();
+  const { reset: resetCall } = useCallStore();
+  const [searchTimer, setSearchTimer] = useState(0);
+  const [partnerPeerId, setPartnerPeerId] = useState("");
+  const [partnerUserId, setPartnerUserId] = useState("");
+
+  useEffect(() => {
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+    if (profile && !profile.englishLevel) {
+      router.push("/onboarding");
+      return;
+    }
+    setTopic(getTodaysTopic());
+  }, [user, profile, router]);
+
+  useEffect(() => {
+    if (state !== "SEARCHING" && state !== "IN_CALL") return;
+
+    const socket = getSocket();
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    socket.on("queuePosition", ({ waitingCount: c }) => {
+      setWaitingCount(c);
+    });
+
+    socket.on("matchFound", (data) => {
+      setPartner(data.partner);
+      setRoomId(data.roomId);
+      setIsCaller(data.isCaller);
+      setPartnerUserId(data.partnerUserId);
+      setPartnerPeerId(data.partnerUserId);
+      setState("MATCHED");
+      toast.success("Match found!");
+      setTimeout(() => setState("IN_CALL"), 2000);
+    });
+
+    socket.on("partnerLeft", () => {
+      toast.error("Your partner left the call");
+      handleEndCall();
+    });
+
+    return () => {
+      socket.off("queuePosition");
+      socket.off("matchFound");
+      socket.off("partnerLeft");
+    };
+  }, [state]);
+
+  useEffect(() => {
+    if (state !== "SEARCHING") return;
+    const interval = setInterval(() => {
+      setSearchTimer((t) => t + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [state]);
+
+  function handleJoinQueue() {
+    if (!user || !profile) return;
+    const socket = connectSocket(user.id);
+    socket.emit("joinQueue", {
+      userId: user.id,
+      level: profile.englishLevel,
+      interests: profile.interests,
+    });
+    setState("SEARCHING");
+    setSearchTimer(0);
+    toast.success("Searching for a partner...");
+  }
+
+  function handleLeaveQueue() {
+    const socket = getSocket();
+    socket.emit("leaveQueue");
+    disconnectSocket();
+    reset();
+    toast("Left the queue", { icon: "👋" });
+  }
+
+  async function handleEndCall() {
+    const socket = getSocket();
+    socket.emit("callEnded", { roomId });
+
+    if (user && partnerUserId) {
+      const result = await createSession({
+        user1Id: user.id,
+        user2Id: partnerUserId,
+        durationSeconds: useCallStore.getState().durationSeconds,
+        topicUsed: topic,
+      });
+
+      if (!result.success) {
+        toast.error("Failed to save session");
+      }
+    }
+
+    setState("ENDED");
+    resetCall();
+  }
+
+  async function handleRating(positive: boolean) {
+    if (!user || !partnerUserId || !roomId) {
+      toast.success("Thanks for your feedback!");
+      setTimeout(() => reset(), 1500);
+      return;
+    }
+
+    try {
+      const updateData: Record<string, boolean> =
+        user.id < partnerUserId
+          ? { user1Rating: positive }
+          : { user2Rating: positive };
+      await (getSupabase().from("Session") as any).update(updateData).eq("roomUrl", roomId).single();
+    } catch {
+      // Rating is non-critical, continue
+    }
+
+    toast.success("Thanks for your feedback!");
+    setTimeout(() => reset(), 1500);
+  }
+
+  function handleSkipRating() {
+    reset();
+  }
+
+  return (
+    <>
+      <Navbar />
+      <main className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-4xl flex-col items-center justify-center px-4 py-8">
+        {state === "IDLE" && (
+          <div className="flex flex-col items-center gap-6">
+            <h1 className="text-2xl font-bold">Ready to practice?</h1>
+            <Card className="w-full max-w-md">
+              <CardContent className="pt-6 text-center">
+                <h2 className="font-semibold">Today&apos;s Topic</h2>
+                <p className="mt-2 text-gray-600">{topic}</p>
+              </CardContent>
+            </Card>
+            <Button size="lg" onClick={handleJoinQueue}>
+              Find a Partner
+            </Button>
+          </div>
+        )}
+
+        {state === "SEARCHING" && (
+          <div className="flex flex-col items-center gap-6">
+            <div className="h-16 w-16 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <h2 className="text-xl font-semibold">Finding your match...</h2>
+            <p className="text-sm text-gray-500">
+              {searchTimer < 30
+                ? "Looking for someone with similar interests..."
+                : searchTimer < 45
+                ? "Expanding search to same level..."
+                : "Searching adjacent levels..."}
+            </p>
+            <p className="text-lg font-bold text-primary">{searchTimer}s</p>
+            <p className="text-sm text-gray-400">
+              {waitingCount} other{waitingCount !== 1 ? "s" : ""} in queue
+            </p>
+            <Button variant="outline" onClick={handleLeaveQueue}>
+              Cancel
+            </Button>
+          </div>
+        )}
+
+        {state === "MATCHED" && partner && (
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 text-3xl">
+              {partner.country ? getFlagEmoji(partner.country) : "🎉"}
+            </div>
+            <h2 className="text-xl font-bold">Match found!</h2>
+            <p className="text-lg">{partner.name}</p>
+            <div className="flex gap-2">
+              <Badge>{partner.level}</Badge>
+              <Badge variant="outline">{partner.country}</Badge>
+            </div>
+            <p className="text-sm text-gray-500">Starting call...</p>
+          </div>
+        )}
+
+        {state === "IN_CALL" && roomId && partner && (
+          <div className="w-full">
+            <div className="mb-4 flex items-center justify-between rounded-card bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{partner.name}</span>
+                {partner.country && (
+                  <span>{getFlagEmoji(partner.country)}</span>
+                )}
+                <Badge variant="outline">{partner.level}</Badge>
+              </div>
+              <div className="text-sm text-gray-500">{topic}</div>
+            </div>
+
+            <VideoCall
+              partnerPeerId={partnerPeerId}
+              isCaller={isCaller}
+              onEndCall={handleEndCall}
+            />
+          </div>
+        )}
+
+        {state === "ENDED" && (
+          <div className="flex flex-col items-center gap-6">
+            <h2 className="text-xl font-bold">Session ended</h2>
+            <p className="text-gray-500">How was your session?</p>
+            <div className="flex gap-4">
+              <Button
+                variant="success"
+                onClick={() => handleRating(true)}
+                className="px-8"
+              >
+                Thumbs Up
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => handleRating(false)}
+                className="px-8"
+              >
+                Thumbs Down
+              </Button>
+            </div>
+            <Button variant="ghost" onClick={handleSkipRating}>
+              Skip
+            </Button>
+          </div>
+        )}
+      </main>
+    </>
+  );
+}
+
+function getFlagEmoji(country: string): string {
+  const flags: Record<string, string> = {
+    Brazil: "🇧🇷", China: "🇨🇳", Colombia: "🇨🇴", Egypt: "🇪🇬",
+    France: "🇫🇷", Germany: "🇩🇪", India: "🇮🇳", Indonesia: "🇮🇩",
+    Italy: "🇮🇹", Japan: "🇯🇵", Mexico: "🇲🇽", Morocco: "🇲🇦",
+    Philippines: "🇵🇭", Russia: "🇷🇺", "Saudi Arabia": "🇸🇦",
+    "South Korea": "🇰🇷", Spain: "🇪🇸", Thailand: "🇹🇭",
+    Turkey: "🇹🇷", Ukraine: "🇺🇦", "United Kingdom": "🇬🇧",
+    "United States": "🇺🇸", Vietnam: "🇻🇳",
+  };
+  return flags[country] || "🌍";
+}
