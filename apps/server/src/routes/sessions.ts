@@ -1,4 +1,5 @@
 import { Router, Response } from "express";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
@@ -26,7 +27,7 @@ router.post(
 
     const minutes = Math.floor(durationSeconds / 60);
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const session = await tx.session.create({
         data: {
           user1Id,
