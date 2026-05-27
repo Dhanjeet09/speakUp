@@ -24,8 +24,6 @@ function extractToken(req: AuthenticatedRequest): string | null {
     }
   }
 
-  const allCookies = Object.keys(req.cookies || {});
-  logDebug("Auth", "No auth token found", { availableCookies: allCookies });
   return null;
 }
 
@@ -67,7 +65,7 @@ export function requireSameUser(
   res: Response,
   next: NextFunction
 ): void {
-  const targetId = req.params.id || req.body.userId || req.body.user1Id;
+  const targetId = req.params.id || req.params.userId;
   if (targetId && req.userId !== targetId) {
     logWarn("Auth", "Forbidden access", { userId: req.userId, targetId });
     res.status(403).json({ success: false, error: "Forbidden" });

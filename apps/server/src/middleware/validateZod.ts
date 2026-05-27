@@ -9,7 +9,7 @@ export function validateZod(schema: ZodSchema, sanitizeFields: string[] = []) {
 
     if (!result.success) {
       const messages = result.error.issues.map(
-        (issue) => `${String(issue.path.join("."))}: ${issue.message}`
+        (issue) => `${issue.path.join(".")}: ${issue.message}`
       );
       res.status(400).json({ success: false, error: messages.join("; ") });
       return;

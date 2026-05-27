@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -9,7 +9,6 @@ import { useCallStore } from "@/store/useCallStore";
 import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 import { getTodaysTopic } from "@/lib/topics";
 import { createSession } from "@/lib/api/sessions";
-import { getSupabase } from "@/lib/supabase";
 import Navbar from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -48,6 +47,9 @@ export default function MatchPage() {
   const [partnerPeerId, setPartnerPeerId] = useState("");
   const [partnerUserId, setPartnerUserId] = useState("");
 
+  const handleEndCallRef = useRef<() => void>(() => {});
+  const sessionCreatedRef = useRef(false);
+
   useEffect(() => {
     if (!user) {
       router.push("/login");
@@ -58,7 +60,7 @@ export default function MatchPage() {
       return;
     }
     setTopic(getTodaysTopic());
-  }, [user, profile, router]);
+  }, [user, profile, router, setTopic]);
 
   useEffect(() => {
     if (state !== "SEARCHING" && state !== "IN_CALL") return;
@@ -68,11 +70,17 @@ export default function MatchPage() {
       socket.connect();
     }
 
-    socket.on("queuePosition", ({ waitingCount: c }) => {
+    const onQueuePosition = ({ waitingCount: c }: { waitingCount: number }) => {
       setWaitingCount(c);
-    });
+    };
 
-    socket.on("matchFound", (data) => {
+    const onMatchFound = (data: {
+      partner: { name: string; country: string; level: string };
+      roomId: string;
+      isCaller: boolean;
+      partnerUserId: string;
+    }) => {
+      sessionCreatedRef.current = false;
       setPartner(data.partner);
       setRoomId(data.roomId);
       setIsCaller(data.isCaller);
@@ -81,19 +89,23 @@ export default function MatchPage() {
       setState("MATCHED");
       toast.success("Match found!");
       setTimeout(() => setState("IN_CALL"), 2000);
-    });
+    };
 
-    socket.on("partnerLeft", () => {
+    const onPartnerLeft = () => {
       toast.error("Your partner left the call");
-      handleEndCall();
-    });
+      handleEndCallRef.current();
+    };
+
+    socket.on("queuePosition", onQueuePosition);
+    socket.on("matchFound", onMatchFound);
+    socket.on("partnerLeft", onPartnerLeft);
 
     return () => {
-      socket.off("queuePosition");
-      socket.off("matchFound");
-      socket.off("partnerLeft");
+      socket.off("queuePosition", onQueuePosition);
+      socket.off("matchFound", onMatchFound);
+      socket.off("partnerLeft", onPartnerLeft);
     };
-  }, [state]);
+  }, [state, setPartner, setRoomId, setIsCaller, setWaitingCount, setState]);
 
   useEffect(() => {
     if (state !== "SEARCHING") return;
@@ -124,26 +136,29 @@ export default function MatchPage() {
     toast("Left the queue", { icon: "👋" });
   }
 
-  async function handleEndCall() {
+  const handleEndCall = useCallback(async () => {
     const socket = getSocket();
-    socket.emit("callEnded", { roomId });
+    socket.emit("callEnded", { roomId, partnerUserId });
 
-    if (user && partnerUserId) {
-      const result = await createSession({
-        user1Id: user.id,
-        user2Id: partnerUserId,
-        durationSeconds: useCallStore.getState().durationSeconds,
-        topicUsed: topic,
-      });
-
-      if (!result.success) {
+    if (user && partnerUserId && isCaller && !sessionCreatedRef.current) {
+      sessionCreatedRef.current = true;
+      const callDuration = useCallStore.getState().durationSeconds;
+      try {
+        await createSession({
+          user1Id: user.id,
+          user2Id: partnerUserId,
+          durationSeconds: callDuration,
+          topicUsed: topic,
+        });
+      } catch {
         toast.error("Failed to save session");
       }
     }
 
     setState("ENDED");
     resetCall();
-  }
+  }, [user, partnerUserId, roomId, topic, isCaller, setState, resetCall]);
+  handleEndCallRef.current = handleEndCall;
 
   async function handleRating(positive: boolean) {
     if (!user || !partnerUserId || !roomId) {
@@ -153,13 +168,9 @@ export default function MatchPage() {
     }
 
     try {
-      const updateData: Record<string, boolean> =
-        user.id < partnerUserId
-          ? { user1Rating: positive }
-          : { user2Rating: positive };
-      await (getSupabase().from("Session") as any).update(updateData).eq("roomUrl", roomId).single();
+      const { put } = await import("@/lib/api/client");
+      await put(`/sessions/${roomId}/rating`, { positive, userId: user.id });
     } catch {
-      // Rating is non-critical, continue
     }
 
     toast.success("Thanks for your feedback!");

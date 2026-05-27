@@ -9,30 +9,34 @@ const ICE_SERVERS = {
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
     ],
   },
 };
 
+export type PeerErrorType =
+  | "network"
+  | "peer-unavailable"
+  | "browser-incompatible"
+  | "disconnected"
+  | "server-error"
+  | "unknown";
+
+export interface PeerError {
+  type: PeerErrorType;
+  message: string;
+}
+
 export function createPeer(userId: string): Peer {
   destroyPeer();
   peer = new Peer(userId, ICE_SERVERS);
-
-  peer.on("error", (err) => {
-    console.error("PeerJS error:", err.type, err.message);
-  });
-
   return peer;
 }
 
 export function destroyPeer(): void {
-  if (currentCall) {
-    currentCall.close();
-    currentCall = null;
-  }
-  if (localStream) {
-    localStream.getTracks().forEach((t) => t.stop());
-    localStream = null;
-  }
+  endCall();
   if (peer) {
     peer.destroy();
     peer = null;
@@ -41,6 +45,10 @@ export function destroyPeer(): void {
 
 export async function startLocalStream(): Promise<MediaStream> {
   if (localStream) return localStream;
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("browser-incompatible");
+  }
 
   localStream = await navigator.mediaDevices.getUserMedia({
     video: true,
@@ -93,13 +101,16 @@ export function initiateCall(
     currentCall.close();
   }
 
-  currentCall = peer.call(peerId, stream);
-  currentCall.on("stream", onRemoteStream);
-  currentCall.on("close", () => {
+  const call = peer.call(peerId, stream);
+  if (!call) throw new Error("peer-unavailable");
+
+  call.on("stream", onRemoteStream);
+  call.on("close", () => {
     currentCall = null;
   });
 
-  return currentCall;
+  currentCall = call;
+  return call;
 }
 
 export function toggleMute(): boolean {
@@ -126,5 +137,21 @@ export function endCall(): void {
   if (localStream) {
     localStream.getTracks().forEach((t) => t.stop());
     localStream = null;
+  }
+}
+
+export function mapPeerError(err: { type: string; message: string }): PeerError {
+  switch (err.type) {
+    case "network":
+    case "disconnected":
+      return { type: "network", message: "Connection lost, retrying..." };
+    case "peer-unavailable":
+      return { type: "peer-unavailable", message: "Partner disconnected before connecting" };
+    case "browser-incompatible":
+      return { type: "browser-incompatible", message: "Your browser doesn't support video calls" };
+    case "server-error":
+      return { type: "server-error", message: "Call service unavailable, try again" };
+    default:
+      return { type: "unknown", message: err.message || "An unexpected error occurred" };
   }
 }

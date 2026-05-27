@@ -1,0 +1,32 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    ports:
+      - "4000:4000"
+    env_file: ./apps/server/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://speakup:password@db:5432/speakup
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: speakup
+      POSTGRES_USER: speakup
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U speakup"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

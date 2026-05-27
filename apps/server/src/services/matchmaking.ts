@@ -1,5 +1,5 @@
 import { getIO } from "../lib/socket";
-import { logDebug, logInfo, logWarn } from "../lib/logger";
+import { logDebug, logInfo, logWarn, logError } from "../lib/logger";
 import type { QueueUser } from "../types";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
@@ -24,6 +24,10 @@ function setQueue(level: string, queue: QueueUser[]) {
 }
 
 export async function addToQueue(user: QueueUser): Promise<void> {
+  if (userMap.has(user.userId)) {
+    logDebug("Matchmaking", "User already in queue, skipping", { userId: user.userId });
+    return;
+  }
   const queue = getQueue(user.level);
   queue.push({ ...user, joinedAt: Date.now() });
   setQueue(user.level, queue);
@@ -35,12 +39,12 @@ export async function removeFromQueue(userId: string): Promise<void> {
   const user = userMap.get(userId);
   if (!user) return;
 
-  const queue = getQueue(user.level);
-  setQueue(
-    user.level,
-    queue.filter((u) => u.userId !== userId)
-  );
   userMap.delete(userId);
+  const queue = getQueue(user.level);
+  const filtered = queue.filter((u) => u.userId !== userId);
+  if (filtered.length !== queue.length) {
+    setQueue(user.level, filtered);
+  }
   logDebug("Matchmaking", "User removed from queue", { userId, level: user.level });
 }
 
@@ -140,6 +144,14 @@ function getAdjacentLevels(level: string): string[] {
 let matchCounter = 0;
 
 async function createMatch(userA: QueueUser, userB: QueueUser): Promise<void> {
+  if (!userMap.has(userA.userId) || !userMap.has(userB.userId)) {
+    logWarn("Matchmaking", "Match aborted: one or both users already removed", {
+      userA: userA.userId,
+      userB: userB.userId,
+    });
+    return;
+  }
+
   const roomId = `room_${++matchCounter}_${Date.now()}`;
   const topic = getTodaysTopic();
 
@@ -191,27 +203,38 @@ function getTodaysTopic(): string {
   return topics[dayOfYear % topics.length];
 }
 
+export function resetQueues(): void {
+  for (const level of LEVELS) {
+    queues.set(`queue:${level}`, []);
+  }
+  userMap.clear();
+}
+
 export function initMatchmaking(): void {
   setInterval(async () => {
-    removeStaleEntries();
+    try {
+      removeStaleEntries();
 
-    let matched = true;
-    let iterations = 0;
-    const MAX_ITERATIONS = 50;
+      let matched = true;
+      let iterations = 0;
+      const MAX_ITERATIONS = 50;
 
-    while (matched && iterations < MAX_ITERATIONS) {
-      matched = false;
-      const found = await tryMatchOnce();
-      if (found) {
-        matched = true;
-        iterations++;
-      } else {
-        const adjFound = await tryAdjacentLevelMatch();
-        if (adjFound) {
+      while (matched && iterations < MAX_ITERATIONS) {
+        matched = false;
+        const found = await tryMatchOnce();
+        if (found) {
           matched = true;
           iterations++;
+        } else {
+          const adjFound = await tryAdjacentLevelMatch();
+          if (adjFound) {
+            matched = true;
+            iterations++;
+          }
         }
       }
+    } catch (err) {
+      logError("Matchmaking", "Match interval error", { error: String(err) });
     }
   }, MATCH_INTERVAL_MS);
 }

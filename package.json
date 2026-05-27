@@ -1,11 +1,22 @@
 {
   "name": "speakup",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
     "dev:web": "npm run dev -w apps/web",
     "dev:server": "npm run dev -w apps/server",
     "build:web": "npm run build -w apps/web",
     "build:server": "npm run build -w apps/server"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.5.0"
   }
 }

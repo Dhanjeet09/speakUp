@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useAuthStore } from "@/store/useAuthStore";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
-import { getSocket } from "@/lib/socket";
+import { getSocket, disconnectSocket } from "@/lib/socket";
 
 const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const steps = [
@@ -23,6 +24,7 @@ const features = [
 ];
 
 export default function LandingPage() {
+  const { user } = useAuthStore();
   const [onlineCount, setOnlineCount] = useState(0);
 
   useEffect(() => {
@@ -37,9 +39,7 @@ export default function LandingPage() {
 
     return () => {
       socket.off("onlineCount");
-      if (socket.connected) {
-        socket.disconnect();
-      }
+      disconnectSocket();
     };
   }, []);
 
@@ -58,14 +58,16 @@ export default function LandingPage() {
             friends.
           </p>
           <div className="mt-8 flex items-center gap-4">
-            <Link href="/signup">
+            <Link href={user ? "/dashboard" : "/signup"}>
               <Button size="lg">Start Speaking Now</Button>
             </Link>
-            <Link href="/login">
-              <Button variant="outline" size="lg">
-                I already have an account
-              </Button>
-            </Link>
+            {!user && (
+              <Link href="/login">
+                <Button variant="outline" size="lg">
+                  I already have an account
+                </Button>
+              </Link>
+            )}
           </div>
           <div className="mt-6 flex items-center gap-2 text-sm text-gray-500">
             <span className="inline-block h-2 w-2 rounded-full bg-success" />
@@ -75,7 +77,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="bg-white py-16">
+        <section className="bg-white py-16" id="features">
           <div className="mx-auto max-w-6xl px-4">
             <h2 className="text-center text-2xl font-bold">How it works</h2>
             <div className="mt-10 grid gap-6 md:grid-cols-4">
@@ -109,7 +111,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="bg-white py-16">
+        <section className="bg-white py-16" id="about">
           <div className="mx-auto max-w-6xl px-4 text-center">
             <h2 className="text-2xl font-bold">All levels welcome</h2>
             <p className="mt-2 text-gray-600">

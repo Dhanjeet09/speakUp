@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuthStore } from "@/store/useAuthStore";
-import { getSupabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,13 +30,15 @@ export default function DashboardPage() {
   }, [user, profile, isLoading]);
 
   async function fetchSessions() {
-    const { data } = await (getSupabase().from("Session") as any)
-      .select("*")
-      .or(`user1Id.eq.${user?.id},user2Id.eq.${user?.id}`)
-      .order("createdAt", { ascending: false })
-      .limit(5);
-    if (data) setRecentSessions(data);
-    setLoadingSessions(false);
+    if (!user) return;
+    try {
+      const { getSessions } = await import("@/lib/api/sessions");
+      const res = await getSessions(user.id, 5);
+      if (res?.sessions) setRecentSessions(res.sessions);
+    } catch {
+    } finally {
+      setLoadingSessions(false);
+    }
   }
 
   if (isLoading || !profile) {

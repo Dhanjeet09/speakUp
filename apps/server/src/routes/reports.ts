@@ -3,7 +3,7 @@ import { prisma } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
 import { createReportSchema, blockUserSchema } from "../schemas";
-import { AppError } from "../middleware/errorHandler";
+import { AppError, asyncHandler } from "../middleware/errorHandler";
 import { logInfo, logWarn } from "../lib/logger";
 import type { AuthenticatedRequest } from "../types";
 
@@ -13,7 +13,7 @@ router.post(
   "/",
   requireAuth,
   validateZod(createReportSchema, ["note"]),
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { reportedId, reason, note } = req.body;
 
     if (req.userId === reportedId) {
@@ -33,14 +33,14 @@ router.post(
     logInfo("Report", "Report created", { reportId: report.id, reportedId, reason });
 
     res.status(201).json({ success: true, data: { report } });
-  }
+  })
 );
 
 router.post(
   "/block",
   requireAuth,
   validateZod(blockUserSchema),
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { blockedId } = req.body;
 
     if (req.userId === blockedId) {
@@ -69,13 +69,13 @@ router.post(
     });
 
     res.status(201).json({ success: true, data: { block } });
-  }
+  })
 );
 
 router.get(
   "/open",
   requireAuth,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const isAdmin =
       process.env.ADMIN_USER_IDS?.split(",").includes(req.userId || "");
 
@@ -94,13 +94,13 @@ router.get(
     });
 
     res.json({ success: true, data: { reports } });
-  }
+  })
 );
 
 router.put(
   "/:id/resolve",
   requireAuth,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const isAdmin =
       process.env.ADMIN_USER_IDS?.split(",").includes(req.userId || "");
 
@@ -114,7 +114,7 @@ router.put(
     });
 
     res.json({ success: true, data: { report } });
-  }
+  })
 );
 
 export default router;

@@ -62,38 +62,36 @@ export default function OnboardingPage() {
     if (!user) return;
     setLoading(true);
 
-    const { error } = await (getSupabase().from("User") as any).upsert({
-      id: user.id,
-      email: user.email,
-      name: name || user.email?.split("@")[0],
-      country,
-      englishLevel,
-      interests,
-    });
+    try {
+      const { updateUser } = await import("@/lib/api/users");
+      await updateUser(user.id, {
+        name: name || user.email?.split("@")[0] || "User",
+        country,
+        englishLevel,
+        interests,
+      });
 
-    setLoading(false);
+      setProfile({
+        id: user.id,
+        email: user.email ?? "",
+        name: name || user.email?.split("@")[0] || null,
+        country: country || null,
+        avatarUrl: user.user_metadata?.avatar_url || null,
+        englishLevel: englishLevel || null,
+        interests,
+        totalMinutes: 0,
+        totalSessions: 0,
+        currentStreak: 0,
+        createdAt: new Date().toISOString(),
+      });
 
-    if (error) {
-      toast.error(error.message);
-      return;
+      toast.success("Profile saved!");
+      router.push("/dashboard");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save profile");
+    } finally {
+      setLoading(false);
     }
-
-    setProfile({
-      id: user.id,
-      email: user.email ?? "",
-      name: name || user.email?.split("@")[0] || null,
-      country: country || null,
-      avatarUrl: user.user_metadata?.avatar_url || null,
-      englishLevel: englishLevel || null,
-      interests,
-      totalMinutes: 0,
-      totalSessions: 0,
-      currentStreak: 0,
-      createdAt: new Date().toISOString(),
-    });
-
-    toast.success("Profile saved!");
-    router.push("/dashboard");
   }
 
   return (

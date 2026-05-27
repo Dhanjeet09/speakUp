@@ -5,12 +5,12 @@ let client: SupabaseClient | null = null;
 
 export function createSupabaseClient(): SupabaseClient {
   if (!client) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
 
     if (!supabaseUrl) {
       throw new Error(
-        "NEXT_PUBLIC_SUPABASE_URL is not configured in environment"
+        "SUPABASE_URL is not configured in environment"
       );
     }
     if (!supabaseServiceKey) {

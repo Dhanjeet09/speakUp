@@ -10,6 +10,35 @@ function getYesterdayUTC(): string {
   return yesterday.toISOString().split("T")[0];
 }
 
+export function calculateStreak(sessionDates: Date[]): number {
+  if (sessionDates.length === 0) return 0;
+
+  const uniqueDays = [
+    ...new Set(sessionDates.map((d) => getUTCDate(d))),
+  ].sort()
+    .reverse();
+
+  const today = getUTCDate();
+
+  if (uniqueDays[0] !== today && uniqueDays[0] !== getYesterdayUTC()) {
+    return 1;
+  }
+
+  let streak = 1;
+  for (let i = 1; i < uniqueDays.length; i++) {
+    const prev = new Date(uniqueDays[i - 1]);
+    const curr = new Date(uniqueDays[i]);
+    const diffDays = (prev.getTime() - curr.getTime()) / 86400000;
+    if (Math.round(diffDays) === 1) {
+      streak++;
+    } else {
+      break;
+    }
+  }
+
+  return streak;
+}
+
 export async function updateStreak(userId: string): Promise<void> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return;

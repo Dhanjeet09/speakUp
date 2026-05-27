@@ -3,8 +3,8 @@ import { prisma } from "../lib/db";
 import { requireAuth, requireSameUser } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
 import { updateUserSchema } from "../schemas";
-import { AppError } from "../middleware/errorHandler";
-import { logInfo, logWarn } from "../lib/logger";
+import { AppError, asyncHandler } from "../middleware/errorHandler";
+import { logInfo } from "../lib/logger";
 import type { AuthenticatedRequest } from "../types";
 
 const router = Router();
@@ -12,7 +12,7 @@ const router = Router();
 router.get(
   "/:id",
   requireAuth,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const user = await prisma.user.findUnique({
       where: { id: req.params.id },
       select: {
@@ -33,18 +33,11 @@ router.get(
       throw new AppError("User not found", 404);
     }
 
-    const isOwnProfile = req.userId === req.params.id;
-
     res.json({
       success: true,
-      data: {
-        user: {
-          ...user,
-          email: isOwnProfile ? undefined : undefined,
-        },
-      },
+      data: { user },
     });
-  }
+  })
 );
 
 router.put(
@@ -52,7 +45,7 @@ router.put(
   requireAuth,
   requireSameUser,
   validateZod(updateUserSchema, ["name"]),
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { name, country, englishLevel, interests } = req.body;
 
     const updateData: Record<string, unknown> = {};
@@ -69,7 +62,18 @@ router.put(
     });
 
     res.json({ success: true, data: { user } });
-  }
+  })
+);
+
+router.delete(
+  "/:id",
+  requireAuth,
+  requireSameUser,
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    await prisma.user.delete({ where: { id: req.params.id } });
+    logInfo("User", "Account deleted", { userId: req.params.id });
+    res.json({ success: true });
+  })
 );
 
 export default router;

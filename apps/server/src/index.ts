@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import compression from "compression";
@@ -5,13 +6,14 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
-import dotenv from "dotenv";
+import * as Sentry from "@sentry/node";
 
-import { initSocket, getIO, getOnlineUsers } from "./lib/socket";
+import { env } from "./lib/env";
+import { initSocket, getOnlineUsers, checkRateLimit } from "./lib/socket";
 import { disconnectPrisma, initDb } from "./lib/db";
 import { errorHandler } from "./middleware/errorHandler";
 import { requestLogger } from "./middleware/requestLogger";
-import { logInfo, logError, logWarn } from "./lib/logger";
+import { logInfo, logError, logDebug } from "./lib/logger";
 
 import authRoutes from "./routes/auth";
 import sessionsRoutes from "./routes/sessions";
@@ -24,19 +26,29 @@ import {
   initMatchmaking,
 } from "./services/matchmaking";
 
-dotenv.config();
+Sentry.init({ dsn: env.SENTRY_DSN, enabled: env.NODE_ENV === "production" });
 
 const app = express();
 const httpServer = createServer(app);
 
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
+const CORS_ORIGIN = env.CORS_ORIGIN.split(",").map((s) => s.trim());
+const CORS_ORIGIN_STR = CORS_ORIGIN[0];
 
 initDb().catch(() => {});
 
 app.use(
   helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
+    crossOriginEmbedderPolicy: { policy: "require-corp" },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        connectSrc: ["'self'", ...CORS_ORIGIN, "wss://*.supabase.co", "https://*.supabase.co"],
+        imgSrc: ["'self'", "data:", "https://*.supabase.co"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      },
+    },
   })
 );
 app.use(compression());
@@ -82,23 +94,37 @@ app.get("/api/health", (_req, res) => {
 app.use(errorHandler);
 
 const io = initSocket(httpServer);
-const PORT = parseInt(process.env.PORT || "4000", 10);
+const PORT = env.PORT;
 
 io.on("connection", (socket) => {
-  const userId = socket.data.userId as string;
-  socket.join(userId);
-  logInfo("Socket", `User connected`, { userId, socketId: socket.id });
+  const userId = socket.data.userId as string | undefined;
+
+  if (userId) {
+    socket.join(userId);
+    logInfo("Socket", "User connected", { userId, socketId: socket.id });
+  } else {
+    logDebug("Socket", "Anonymous connection", { socketId: socket.id });
+  }
 
   const count = getOnlineUsers(io).size;
   io.emit("onlineCount", { count });
 
-  socket.on("getOnlineCount", () => {
+  function wrapRateLimited<T extends (...args: unknown[]) => void>(fn: T): T {
+    return ((...args: unknown[]) => {
+      if (checkRateLimit(socket.id)) {
+        fn(...args);
+      }
+    }) as T;
+  }
+
+  socket.on("getOnlineCount", wrapRateLimited(() => {
     socket.emit("onlineCount", { count: getOnlineUsers(io).size });
-  });
+  }));
 
   let queueInterval: ReturnType<typeof setInterval> | null = null;
 
-  socket.on("joinQueue", async (data) => {
+  socket.on("joinQueue", wrapRateLimited(async (data) => {
+    if (!userId) return;
     logInfo("Queue", `User joining queue`, { userId, level: data.level, interests: data.interests });
     try {
       await addToQueue({
@@ -121,30 +147,38 @@ io.on("connection", (socket) => {
       logError("Queue", `Failed to join queue`, { userId, error: String(err) });
       socket.emit("error", { message: "Failed to join queue" });
     }
-  });
+  }));
 
-  socket.on("leaveQueue", async () => {
+  socket.on("leaveQueue", wrapRateLimited(async () => {
+    if (!userId) return;
     logInfo("Queue", `User leaving queue`, { userId });
     if (queueInterval) {
       clearInterval(queueInterval);
       queueInterval = null;
     }
     await removeFromQueue(userId);
-  });
+  }));
 
-  socket.on("callEnded", ({ roomId }) => {
-    logInfo("Call", `Call ended`, { userId, roomId });
-    if (roomId) {
+  socket.on("callEnded", wrapRateLimited(({ roomId, partnerUserId }) => {
+    if (!userId) return;
+    logInfo("Call", `Call ended`, { userId, roomId, partnerUserId });
+    if (partnerUserId) {
+      socket.to(partnerUserId).emit("partnerLeft");
+    } else if (roomId) {
       socket.to(roomId).emit("partnerLeft");
     }
-  });
+  }));
 
   socket.on("disconnect", async () => {
-    logInfo("Socket", `User disconnected`, { userId, socketId: socket.id });
+    if (userId) {
+      logInfo("Socket", "User disconnected", { userId, socketId: socket.id });
+      await removeFromQueue(userId);
+    } else {
+      logDebug("Socket", "Anonymous disconnected", { socketId: socket.id });
+    }
     if (queueInterval) {
       clearInterval(queueInterval);
     }
-    await removeFromQueue(userId);
     const count = getOnlineUsers(io).size;
     io.emit("onlineCount", { count });
   });
@@ -153,20 +187,11 @@ io.on("connection", (socket) => {
 const server = httpServer.listen(PORT, () => {
   logInfo("Startup", `SpeakUp server running`, { port: PORT, corsOrigin: CORS_ORIGIN });
 
-  if (process.env.REDIS_URL) {
-    try {
-      initMatchmaking();
-      logInfo("Startup", "Matchmaking started");
-    } catch (err) {
-      logError("Startup", "Matchmaking not available", { error: String(err) });
-    }
-  } else {
-    try {
-      initMatchmaking();
-      logInfo("Startup", "Matchmaking started (in-memory queue)");
-    } catch (err) {
-      logError("Startup", "Matchmaking not available", { error: String(err) });
-    }
+  try {
+    initMatchmaking();
+    logInfo("Startup", "Matchmaking started");
+  } catch (err) {
+    logError("Startup", "Matchmaking not available", { error: String(err) });
   }
 });
 

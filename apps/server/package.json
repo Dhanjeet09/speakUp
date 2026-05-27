@@ -5,9 +5,14 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@speakup/config": "*",
+    "@speakup/types": "*",
     "@prisma/client": "^5.17.0",
     "@supabase/supabase-js": "^2.45.0",
     "compression": "^1.8.1",
@@ -17,9 +22,10 @@
     "express": "^4.19.0",
     "express-rate-limit": "^7.4.0",
     "helmet": "^7.1.0",
+    "pino": "^9.0.0",
     "sanitize-html": "^2.17.4",
+    "@sentry/node": "^8.0.0",
     "socket.io": "^4.7.0",
-    "winston": "^3.19.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -29,8 +35,10 @@
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.0",
     "@types/sanitize-html": "^2.16.1",
-    "prisma": "^5.17.0",
+    "prisma": "^5.22.0",
     "tsx": "^4.16.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "pino-pretty": "^11.0.0",
+    "vitest": "^2.0.0"
   }
 }

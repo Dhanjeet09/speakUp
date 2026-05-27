@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useCallStore } from "@/store/useCallStore";
 import {
@@ -13,6 +13,7 @@ import {
   toggleMute,
   toggleCamera,
   endCall,
+  mapPeerError,
 } from "@/lib/webrtc";
 import { Button } from "@/components/ui/button";
 
@@ -38,6 +39,8 @@ export default function VideoCall({
   const [quality, setQuality] = useState<ConnectionQuality>("good");
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const onEndCallRef = useRef(onEndCall);
+  onEndCallRef.current = onEndCall;
 
   useEffect(() => {
     if (!("mediaDevices" in navigator)) {
@@ -48,9 +51,8 @@ export default function VideoCall({
 
   useEffect(() => {
     if (!user) return;
-
-    let cancelled = false;
     const currentUserId = user.id;
+    let cancelled = false;
 
     async function init() {
       try {
@@ -60,46 +62,74 @@ export default function VideoCall({
           localVideoRef.current.srcObject = stream;
         }
 
-        const peer = createPeer(currentUserId);
-        peerRef.current = peer;
+        const currentPeerId = `${currentUserId}-${Date.now()}`;
+        const p = createPeer(currentPeerId);
+        peerRef.current = p;
 
-        if (isCaller) {
-          const remoteStream = await new Promise<MediaStream>(
-            (resolve, reject) => {
-              const timeout = setTimeout(
-                () => reject(new Error("Call connection timed out")),
-                20000
-              );
-              peer.on("open", () => {
-                clearTimeout(timeout);
-                if (cancelled) return;
+        return new Promise<void>((resolveInit, rejectInit) => {
+          const peerOpenTimeout = setTimeout(() => {
+            rejectInit(new Error("peer-connection-timeout"));
+          }, 15000);
+
+          p.on("open", async () => {
+            clearTimeout(peerOpenTimeout);
+            if (cancelled) return;
+
+            try {
+              if (isCaller) {
                 const local = getLocalStream();
                 if (!local) {
-                  reject(new Error("No local stream available"));
+                  rejectInit(new Error("No local stream available"));
                   return;
                 }
-                initiateCall(partnerPeerId, local, (remote) => {
-                  resolve(remote);
-                });
-              });
-              peer.on("error", (err) => {
-                clearTimeout(timeout);
-                reject(new Error(err.message));
-              });
-            }
-          );
 
-          if (cancelled) return;
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteStream;
-          }
-        } else {
-          await answerIncomingCall((remoteStream) => {
-            if (!cancelled && remoteVideoRef.current) {
-              remoteVideoRef.current.srcObject = remoteStream;
+                const remoteStream = await new Promise<MediaStream>(
+                  (resolve, reject) => {
+                    const callTimeout = setTimeout(() => {
+                      reject(new Error("Call connection timed out"));
+                    }, 20000);
+
+                    p.on("error", (err) => {
+                      clearTimeout(callTimeout);
+                      reject(mapPeerError(err));
+                    });
+
+                    initiateCall(partnerPeerId, local, (remote) => {
+                      clearTimeout(callTimeout);
+                      resolve(remote);
+                    });
+                  }
+                );
+
+                if (cancelled) return;
+                if (remoteVideoRef.current) {
+                  remoteVideoRef.current.srcObject = remoteStream;
+                }
+              } else {
+                const call = await answerIncomingCall((remoteStream) => {
+                  if (!cancelled && remoteVideoRef.current) {
+                    remoteVideoRef.current.srcObject = remoteStream;
+                  }
+                });
+                if (cancelled && call) {
+                  call.close();
+                }
+              }
+              resolveInit();
+            } catch (err) {
+              rejectInit(err);
             }
           });
-        }
+
+          p.on("error", (err) => {
+            clearTimeout(peerOpenTimeout);
+            rejectInit(mapPeerError(err));
+          });
+
+          p.on("disconnected", () => {
+            p.reconnect();
+          });
+        });
       } catch (err) {
         if (!cancelled) {
           const msg =
@@ -138,12 +168,15 @@ export default function VideoCall({
     async function requestWakeLock() {
       try {
         const wl = await navigator.wakeLock.request("screen");
+        if (cancelled) {
+          wl.release();
+          return;
+        }
         wakeLockRef.current = wl;
         wl.addEventListener("release", () => {
           wakeLockRef.current = null;
         });
       } catch {
-        // WakeLock not granted, continue without it
       }
     }
 
@@ -162,10 +195,10 @@ export default function VideoCall({
     if (!peerRef.current) return;
 
     const interval = setInterval(async () => {
-      const peer = peerRef.current;
-      if (!peer) return;
+      const p = peerRef.current;
+      if (!p) return;
       try {
-        const streams = (peer as any).connections || {};
+        const streams = (p as any).connections || {};
         const connKeys = Object.keys(streams);
         if (connKeys.length === 0) return;
         for (const key of connKeys) {
@@ -174,7 +207,10 @@ export default function VideoCall({
             if (conn.peerConnection) {
               const stats = await conn.peerConnection.getStats();
               stats.forEach((report: any) => {
-                if (report.type === "candidate-pair" && report.state === "succeeded") {
+                if (
+                  report.type === "candidate-pair" &&
+                  report.state === "succeeded"
+                ) {
                   const rtt = report.currentRoundTripTime;
                   if (rtt !== undefined) {
                     if (rtt < 0.3) setQuality("good");
@@ -187,7 +223,6 @@ export default function VideoCall({
           }
         }
       } catch {
-        // Stats not available
       }
     }, 5000);
 
@@ -206,8 +241,8 @@ export default function VideoCall({
 
   const handleEndCall = useCallback(() => {
     endCall();
-    onEndCall();
-  }, [onEndCall]);
+    onEndCallRef.current();
+  }, []);
 
   const duration = useCallStore((s) => s.durationSeconds);
   const minutes = Math.floor(duration / 60);
@@ -221,7 +256,10 @@ export default function VideoCall({
 
   if (callError) {
     return (
-      <div className="flex aspect-video w-full flex-col items-center justify-center rounded-card bg-gray-100 text-center">
+      <div
+        className="flex aspect-video w-full flex-col items-center justify-center rounded-card bg-gray-100 text-center"
+        role="alert"
+      >
         <p className="text-danger mb-4">{callError}</p>
         <Button variant="outline" onClick={handleEndCall}>
           Return to dashboard
@@ -248,21 +286,29 @@ export default function VideoCall({
             className="h-full w-full object-cover"
           />
         </div>
-        <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-black/60 px-4 py-1 text-sm text-white">
+        <div
+          className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-black/60 px-4 py-1 text-sm text-white"
+          aria-live="polite"
+        >
           {String(minutes).padStart(2, "0")}:
           {String(seconds).padStart(2, "0")}
         </div>
         <div className="absolute right-4 top-4 flex items-center gap-2 rounded-full bg-black/60 px-3 py-1">
-          <span className={`h-2 w-2 rounded-full ${qualityColor[quality]}`} />
-          <span className="text-xs text-white capitalize">{quality}</span>
+          <span
+            className={`h-2 w-2 rounded-full ${qualityColor[quality]}`}
+            aria-hidden="true"
+          />
+          <span className="text-xs text-white capitalize" aria-label={`Connection ${quality}`}>
+            {quality}
+          </span>
         </div>
       </div>
-      <div className="mt-4 flex justify-center gap-4">
+      <div className="mt-4 flex justify-center gap-4" role="toolbar" aria-label="Call controls">
         <Button
           variant={isMuted ? "danger" : "outline"}
           onClick={handleMute}
           className="h-12 w-12 rounded-full"
-          title={isMuted ? "Unmute" : "Mute"}
+          aria-label={isMuted ? "Unmute" : "Mute"}
         >
           {isMuted ? "🔇" : "🎤"}
         </Button>
@@ -270,7 +316,7 @@ export default function VideoCall({
           variant={isCameraOff ? "danger" : "outline"}
           onClick={handleCamera}
           className="h-12 w-12 rounded-full"
-          title={isCameraOff ? "Turn camera on" : "Turn camera off"}
+          aria-label={isCameraOff ? "Turn camera on" : "Turn camera off"}
         >
           {isCameraOff ? "📷" : "🎥"}
         </Button>
@@ -278,7 +324,7 @@ export default function VideoCall({
           variant="danger"
           onClick={handleEndCall}
           className="h-12 w-12 rounded-full"
-          title="End call"
+          aria-label="End call"
         >
           📞
         </Button>

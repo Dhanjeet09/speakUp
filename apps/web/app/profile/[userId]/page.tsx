@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
-import { getSupabase } from "@/lib/supabase";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -27,12 +26,15 @@ export default function ProfilePage() {
   }, [user, params.userId]);
 
   async function fetchProfile() {
-    const { data } = await (getSupabase().from("User") as any)
-      .select("*")
-      .eq("id", params.userId)
-      .single();
-    setProfile(data);
-    setLoading(false);
+    try {
+      const { getUser } = await import("@/lib/api/users");
+      const res = await getUser(params.userId as string);
+      setProfile(res.user);
+    } catch {
+      setProfile(null);
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (loading) {

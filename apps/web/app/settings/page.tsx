@@ -57,22 +57,16 @@ export default function SettingsPage() {
   async function handleSave() {
     if (!user) return;
     setSaving(true);
-    const { error } = await (getSupabase().from("User") as any).update({
-      name,
-      country,
-      englishLevel,
-      interests,
-    }).eq("id", user.id);
-
-    setSaving(false);
-
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      const { updateUser } = await import("@/lib/api/users");
+      await updateUser(user.id, { name, country, englishLevel, interests });
+      setProfile({ ...profile!, name, country, englishLevel, interests });
+      toast.success("Settings saved!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save");
+    } finally {
+      setSaving(false);
     }
-
-    setProfile({ ...profile!, name, country, englishLevel, interests });
-    toast.success("Settings saved!");
   }
 
   if (isLoading || !profile) {
@@ -190,9 +184,14 @@ export default function SettingsPage() {
                   "Are you sure? This will permanently delete your account."
                 );
                 if (!confirmed) return;
-                await (getSupabase().from("User") as any).delete().eq("id", user?.id);
-                await getSupabase().auth.signOut();
-                router.push("/");
+                try {
+                  const { del } = await import("@/lib/api/client");
+                  await del(`/api/users/${user?.id}`);
+                  await getSupabase().auth.signOut();
+                  router.push("/");
+                } catch {
+                  toast.error("Failed to delete account");
+                }
               }}
             >
               Delete Account

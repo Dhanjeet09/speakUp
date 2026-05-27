@@ -1,6 +1,16 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
-interface ApiResponse<T = unknown> {
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
@@ -20,14 +30,14 @@ async function getAccessToken(): Promise<string | null> {
   }
 }
 
-async function request<T>(
+async function apiCall<T>(
   endpoint: string,
   options: RequestInit = {}
-): Promise<ApiResponse<T>> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+  try {
     const token = await getAccessToken();
 
     const headers: Record<string, string> = {
@@ -39,8 +49,7 @@ async function request<T>(
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const url = `${API_URL}${endpoint}`;
-    const res = await fetch(url, {
+    const res = await fetch(`${API_URL}${endpoint}`, {
       credentials: "include",
       headers,
       signal: controller.signal,
@@ -49,41 +58,46 @@ async function request<T>(
 
     clearTimeout(timeoutId);
 
-    const json = await res.json();
-
     if (!res.ok) {
-      return {
-        success: false,
-        error: json.error || `Request failed with status ${res.status}`,
-      };
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, body.error || `Request failed with status ${res.status}`);
     }
 
-    return json as ApiResponse<T>;
+    return res.json() as Promise<T>;
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
-      return { success: false, error: "Request timed out" };
+    clearTimeout(timeoutId);
+    if (err instanceof ApiError) throw err;
+    if ((err as Error).name === "AbortError") {
+      throw new ApiError(408, "Request timed out");
     }
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Network error",
-    };
+    throw new ApiError(0, err instanceof Error ? err.message : "Network error");
   }
 }
 
+async function callApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const res = await apiCall<ApiResponse<T>>(endpoint, options);
+  if (!res.success) throw new ApiError(0, res.error || "Request failed");
+  return res.data as T;
+}
+
 export function get<T>(endpoint: string) {
-  return request<T>(endpoint, { method: "GET" });
+  return callApi<T>(endpoint, { method: "GET" });
 }
 
 export function post<T>(endpoint: string, body?: unknown) {
-  return request<T>(endpoint, {
+  return callApi<T>(endpoint, {
     method: "POST",
     body: body ? JSON.stringify(body) : undefined,
   });
 }
 
 export function put<T>(endpoint: string, body?: unknown) {
-  return request<T>(endpoint, {
+  return callApi<T>(endpoint, {
     method: "PUT",
     body: body ? JSON.stringify(body) : undefined,
   });
+}
+
+export function del<T>(endpoint: string) {
+  return callApi<T>(endpoint, { method: "DELETE" });
 }

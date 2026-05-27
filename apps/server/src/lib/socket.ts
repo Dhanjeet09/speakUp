@@ -5,6 +5,33 @@ import { logInfo, logWarn, logError, logDebug } from "./logger";
 
 let io: Server | null = null;
 
+const RATE_LIMIT_WINDOW = 10000;
+const RATE_LIMIT_MAX = 10;
+const rateLimitMap = new Map<string, { count: number; start: number }>();
+
+function checkRateLimit(socketId: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(socketId);
+  if (!entry || now - entry.start > RATE_LIMIT_WINDOW) {
+    rateLimitMap.set(socketId, { count: 1, start: now });
+    return true;
+  }
+  entry.count++;
+  if (entry.count > RATE_LIMIT_MAX) {
+    return false;
+  }
+  return true;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateLimitMap) {
+    if (now - entry.start > RATE_LIMIT_WINDOW) {
+      rateLimitMap.delete(key);
+    }
+  }
+}, 30000);
+
 export function getIO(): Server {
   if (!io) {
     throw new Error("Socket.IO not initialized. Call initSocket first.");
@@ -48,6 +75,8 @@ export function initSocket(httpServer: HttpServer): Server {
 
   return io;
 }
+
+export { checkRateLimit };
 
 export function getOnlineUsers(socketServer: Server): Set<string> {
   const users = new Set<string>();

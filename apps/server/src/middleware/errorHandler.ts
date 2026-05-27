@@ -1,5 +1,6 @@
-import { Response, NextFunction } from "express";
+import { Request, Response, NextFunction } from "express";
 import type { AuthenticatedRequest } from "../types";
+import { logError } from "../lib/logger";
 
 export class AppError extends Error {
   constructor(
@@ -11,9 +12,17 @@ export class AppError extends Error {
   }
 }
 
+export function asyncHandler(
+  fn: (req: AuthenticatedRequest, res: Response, next: NextFunction) => Promise<void>
+) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
 export function errorHandler(
   err: Error,
-  _req: AuthenticatedRequest,
+  _req: Request,
   res: Response,
   _next: NextFunction
 ): void {
@@ -25,7 +34,7 @@ export function errorHandler(
     return;
   }
 
-  console.error("Unhandled error:", err);
+  logError("Unhandled error", err.message);
 
   res.status(500).json({
     success: false,

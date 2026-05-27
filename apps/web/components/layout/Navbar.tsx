@@ -15,6 +15,15 @@ export default function Navbar() {
         </Link>
 
         <div className="flex items-center gap-4">
+          <Link href="/" className="text-sm text-gray-600 hover:text-primary">
+            Home
+          </Link>
+          <Link href="/#features" className="text-sm text-gray-600 hover:text-primary">
+            Features
+          </Link>
+          <Link href="/#about" className="text-sm text-gray-600 hover:text-primary">
+            About
+          </Link>
           {user ? (
             <>
               <Link
@@ -24,7 +33,7 @@ export default function Navbar() {
                 Dashboard
               </Link>
               <Link
-                href={profile ? `/profile/${profile.id}` : "/settings"}
+                href={`/profile/${user.id}`}
                 className="text-sm text-gray-600 hover:text-primary"
               >
                 Profile
