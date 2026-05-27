@@ -13,6 +13,7 @@
     "build:web": "npm run build -w apps/web",
     "build:server": "npm run build -w apps/server"
   },
+  "packageManager": "npm@10.8.2",
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
     "@commitlint/config-conventional": "^19.0.0",
