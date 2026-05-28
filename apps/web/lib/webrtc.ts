@@ -1,6 +1,7 @@
 import Peer, { MediaConnection } from "peerjs";
 
 let peer: Peer | null = null;
+let peerUserId: string | null = null;
 let currentCall: MediaConnection | null = null;
 let localStream: MediaStream | null = null;
 
@@ -30,7 +31,11 @@ export interface PeerError {
 }
 
 export function createPeer(userId: string): Peer {
+  if (peer && !peer.destroyed && peerUserId === userId) {
+    return peer;
+  }
   destroyPeer();
+  peerUserId = userId;
   peer = new Peer(userId, ICE_SERVERS);
   return peer;
 }

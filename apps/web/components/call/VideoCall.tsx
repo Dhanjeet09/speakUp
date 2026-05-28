@@ -5,7 +5,6 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { useCallStore } from "@/store/useCallStore";
 import {
   createPeer,
-  destroyPeer,
   startLocalStream,
   getLocalStream,
   answerIncomingCall,
@@ -143,7 +142,7 @@ export default function VideoCall({
 
     return () => {
       cancelled = true;
-      destroyPeer();
+      endCall();
       peerRef.current = null;
     };
   }, [user, partnerPeerId, isCaller]);
