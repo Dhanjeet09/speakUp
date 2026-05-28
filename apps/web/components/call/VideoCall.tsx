@@ -62,7 +62,7 @@ export default function VideoCall({
           localVideoRef.current.srcObject = stream;
         }
 
-        const currentPeerId = `${currentUserId}-${Date.now()}`;
+        const currentPeerId = currentUserId;
         const p = createPeer(currentPeerId);
         peerRef.current = p;
 
