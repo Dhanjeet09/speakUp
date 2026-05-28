@@ -71,6 +71,7 @@ export default function VideoCall({
           callPromise = answerIncomingCall((remoteStream) => {
             if (!cancelled && remoteVideoRef.current) {
               remoteVideoRef.current.srcObject = remoteStream;
+              remoteVideoRef.current.play().catch(() => {});
             }
           });
         }
@@ -113,6 +114,7 @@ export default function VideoCall({
                 if (cancelled) return;
                 if (remoteVideoRef.current) {
                   remoteVideoRef.current.srcObject = remoteStream;
+                  remoteVideoRef.current.play().catch(() => {});
                 }
               } else {
                 await callPromise;
