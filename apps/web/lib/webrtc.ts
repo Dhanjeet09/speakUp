@@ -17,7 +17,18 @@ const ICE_SERVERS = {
   },
 };
 
-let callHandler: ((call: MediaConnection) => void) | null = null;
+export type PeerErrorType =
+  | "network"
+  | "peer-unavailable"
+  | "browser-incompatible"
+  | "disconnected"
+  | "server-error"
+  | "unknown";
+
+export interface PeerError {
+  type: PeerErrorType;
+  message: string;
+}
 
 export function createPeer(userId: string): Peer {
   if (peer && !peer.destroyed && peerUserId === userId) {
@@ -31,15 +42,10 @@ export function createPeer(userId: string): Peer {
 
 export function destroyPeer(): void {
   endCall();
-  if (callHandler && peer) {
-    peer.off("call", callHandler);
-    callHandler = null;
-  }
   if (peer) {
     peer.destroy();
     peer = null;
   }
-  peerUserId = null;
 }
 
 export async function startLocalStream(): Promise<MediaStream> {
@@ -73,11 +79,7 @@ export function answerIncomingCall(
       reject(new Error("No incoming call received within timeout"));
     }, 15000);
 
-    if (callHandler) {
-      peer.off("call", callHandler);
-    }
-
-    callHandler = (call) => {
+    peer.on("call", (call) => {
       clearTimeout(timeout);
       const stream = getLocalStream();
       if (!stream) {
@@ -85,16 +87,14 @@ export function answerIncomingCall(
         reject(new Error("No local stream available to answer call"));
         return;
       }
-      call.on("stream", onRemoteStream);
       call.answer(stream);
+      call.on("stream", onRemoteStream);
       call.on("close", () => {
         currentCall = null;
       });
       currentCall = call;
       resolve(call);
-    };
-
-    peer.on("call", callHandler);
+    });
   });
 }
 
@@ -146,19 +146,6 @@ export function endCall(): void {
     localStream.getTracks().forEach((t) => t.stop());
     localStream = null;
   }
-}
-
-export type PeerErrorType =
-  | "network"
-  | "peer-unavailable"
-  | "browser-incompatible"
-  | "disconnected"
-  | "server-error"
-  | "unknown";
-
-export interface PeerError {
-  type: PeerErrorType;
-  message: string;
 }
 
 export function mapPeerError(err: { type: string; message: string }): PeerError {
