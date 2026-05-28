@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useCallStore } from "@/store/useCallStore";
 import type { MediaConnection } from "peerjs";
 import {
   createPeer,
-  destroyPeer,
   startLocalStream,
   getLocalStream,
   answerIncomingCall,
@@ -26,7 +25,22 @@ interface VideoCallProps {
 
 type ConnectionQuality = "good" | "fair" | "poor";
 
-export default function VideoCall({
+const CallTimer = React.memo(function CallTimer() {
+  const duration = useCallStore((s) => s.durationSeconds);
+  const minutes = Math.floor(duration / 60);
+  const seconds = duration % 60;
+  return (
+    <div
+      className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-black/60 px-4 py-1 text-sm text-white"
+      aria-live="polite"
+    >
+      {String(minutes).padStart(2, "0")}:
+      {String(seconds).padStart(2, "0")}
+    </div>
+  );
+});
+
+const VideoCall = React.memo(function VideoCall({
   partnerPeerId,
   isCaller,
   onEndCall,
@@ -72,12 +86,11 @@ export default function VideoCall({
           callPromise = answerIncomingCall((remoteStream) => {
             if (!cancelled && remoteVideoRef.current) {
               remoteVideoRef.current.srcObject = remoteStream;
-              remoteVideoRef.current.play().catch(() => {});
             }
           });
         }
 
-        await new Promise<void>((resolveInit, rejectInit) => {
+        return new Promise<void>((resolveInit, rejectInit) => {
           const peerOpenTimeout = setTimeout(() => {
             rejectInit(new Error("peer-connection-timeout"));
           }, 15000);
@@ -115,7 +128,6 @@ export default function VideoCall({
                 if (cancelled) return;
                 if (remoteVideoRef.current) {
                   remoteVideoRef.current.srcObject = remoteStream;
-                  remoteVideoRef.current.play().catch(() => {});
                 }
               } else {
                 await callPromise;
@@ -148,7 +160,7 @@ export default function VideoCall({
 
     return () => {
       cancelled = true;
-      destroyPeer();
+      endCall();
       peerRef.current = null;
     };
   }, [user, partnerPeerId, isCaller]);
@@ -247,10 +259,6 @@ export default function VideoCall({
     onEndCallRef.current();
   }, []);
 
-  const duration = useCallStore((s) => s.durationSeconds);
-  const minutes = Math.floor(duration / 60);
-  const seconds = duration % 60;
-
   const qualityColor = {
     good: "bg-success",
     fair: "bg-yellow-500",
@@ -289,13 +297,7 @@ export default function VideoCall({
             className="h-full w-full object-cover"
           />
         </div>
-        <div
-          className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-black/60 px-4 py-1 text-sm text-white"
-          aria-live="polite"
-        >
-          {String(minutes).padStart(2, "0")}:
-          {String(seconds).padStart(2, "0")}
-        </div>
+        <CallTimer />
         <div className="absolute right-4 top-4 flex items-center gap-2 rounded-full bg-black/60 px-3 py-1">
           <span
             className={`h-2 w-2 rounded-full ${qualityColor[quality]}`}
@@ -334,4 +336,6 @@ export default function VideoCall({
       </div>
     </div>
   );
-}
+});
+
+export default VideoCall;
