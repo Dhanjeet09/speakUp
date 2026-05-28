@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useCallStore } from "@/store/useCallStore";
+import type { MediaConnection } from "peerjs";
 import {
   createPeer,
   startLocalStream,
@@ -61,9 +62,18 @@ export default function VideoCall({
           localVideoRef.current.srcObject = stream;
         }
 
-        const currentPeerId = currentUserId;
-        const p = createPeer(currentPeerId);
+        const p = createPeer(currentUserId);
         peerRef.current = p;
+
+        let callPromise: Promise<MediaConnection> | null = null;
+
+        if (!isCaller) {
+          callPromise = answerIncomingCall((remoteStream) => {
+            if (!cancelled && remoteVideoRef.current) {
+              remoteVideoRef.current.srcObject = remoteStream;
+            }
+          });
+        }
 
         return new Promise<void>((resolveInit, rejectInit) => {
           const peerOpenTimeout = setTimeout(() => {
@@ -105,14 +115,7 @@ export default function VideoCall({
                   remoteVideoRef.current.srcObject = remoteStream;
                 }
               } else {
-                const call = await answerIncomingCall((remoteStream) => {
-                  if (!cancelled && remoteVideoRef.current) {
-                    remoteVideoRef.current.srcObject = remoteStream;
-                  }
-                });
-                if (cancelled && call) {
-                  call.close();
-                }
+                await callPromise;
               }
               resolveInit();
             } catch (err) {
@@ -191,8 +194,6 @@ export default function VideoCall({
   }, []);
 
   useEffect(() => {
-    if (!peerRef.current) return;
-
     const interval = setInterval(async () => {
       const p = peerRef.current;
       if (!p) return;

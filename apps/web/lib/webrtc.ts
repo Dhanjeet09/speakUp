@@ -5,27 +5,17 @@ let peerUserId: string | null = null;
 let currentCall: MediaConnection | null = null;
 let localStream: MediaStream | null = null;
 
-function getPeerJSOptions() {
-  const apiUrl =
-    process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_SOCKET_URL || "";
-  const isLocal = apiUrl.includes("localhost");
-  const url = new URL(isLocal ? "http://localhost:4000" : apiUrl);
-  return {
-    host: url.hostname,
-    port: isLocal ? Number(url.port) || 4000 : 443,
-    path: "/peerjs",
-    secure: !isLocal,
-    config: {
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:stun2.l.google.com:19302" },
-        { urls: "stun:stun3.l.google.com:19302" },
-        { urls: "stun:stun4.l.google.com:19302" },
-      ],
-    },
-  };
-}
+const ICE_SERVERS = {
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
+    ],
+  },
+};
 
 export type PeerErrorType =
   | "network"
@@ -46,7 +36,7 @@ export function createPeer(userId: string): Peer {
   }
   destroyPeer();
   peerUserId = userId;
-  peer = new Peer(userId, getPeerJSOptions());
+  peer = new Peer(userId, ICE_SERVERS);
   return peer;
 }
 
@@ -92,9 +82,12 @@ export function answerIncomingCall(
     peer.on("call", (call) => {
       clearTimeout(timeout);
       const stream = getLocalStream();
-      if (stream) {
-        call.answer(stream);
+      if (!stream) {
+        call.close();
+        reject(new Error("No local stream available to answer call"));
+        return;
       }
+      call.answer(stream);
       call.on("stream", onRemoteStream);
       call.on("close", () => {
         currentCall = null;
