@@ -6,6 +6,7 @@ import { useCallStore } from "@/store/useCallStore";
 import type { MediaConnection } from "peerjs";
 import {
   createPeer,
+  destroyPeer,
   startLocalStream,
   getLocalStream,
   answerIncomingCall,
@@ -76,7 +77,7 @@ export default function VideoCall({
           });
         }
 
-        return new Promise<void>((resolveInit, rejectInit) => {
+        await new Promise<void>((resolveInit, rejectInit) => {
           const peerOpenTimeout = setTimeout(() => {
             rejectInit(new Error("peer-connection-timeout"));
           }, 15000);
@@ -147,7 +148,7 @@ export default function VideoCall({
 
     return () => {
       cancelled = true;
-      endCall();
+      destroyPeer();
       peerRef.current = null;
     };
   }, [user, partnerPeerId, isCaller]);
