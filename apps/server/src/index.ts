@@ -8,6 +8,8 @@ import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import * as Sentry from "@sentry/node";
 
+import { ExpressPeerServer } from "peer";
+
 import { env } from "./lib/env";
 import { initSocket, getOnlineUsers, checkRateLimit } from "./lib/socket";
 import { disconnectPrisma, initDb } from "./lib/db";
@@ -95,6 +97,8 @@ app.use(errorHandler);
 
 const io = initSocket(httpServer);
 const PORT = env.PORT;
+
+app.use("/peerjs", ExpressPeerServer(httpServer, { path: "/peerjs" }));
 
 io.on("connection", (socket) => {
   const userId = socket.data.userId as string | undefined;
