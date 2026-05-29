@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useCallStore } from "@/store/useCallStore";
 import type { MediaConnection } from "peerjs";
@@ -25,22 +25,7 @@ interface VideoCallProps {
 
 type ConnectionQuality = "good" | "fair" | "poor";
 
-const CallTimer = React.memo(function CallTimer() {
-  const duration = useCallStore((s) => s.durationSeconds);
-  const minutes = Math.floor(duration / 60);
-  const seconds = duration % 60;
-  return (
-    <div
-      className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-black/60 px-4 py-1 text-sm text-white"
-      aria-live="polite"
-    >
-      {String(minutes).padStart(2, "0")}:
-      {String(seconds).padStart(2, "0")}
-    </div>
-  );
-});
-
-const VideoCall = React.memo(function VideoCall({
+export default function VideoCall({
   partnerPeerId,
   isCaller,
   onEndCall,
@@ -259,6 +244,10 @@ const VideoCall = React.memo(function VideoCall({
     onEndCallRef.current();
   }, []);
 
+  const duration = useCallStore((s) => s.durationSeconds);
+  const minutes = Math.floor(duration / 60);
+  const seconds = duration % 60;
+
   const qualityColor = {
     good: "bg-success",
     fair: "bg-yellow-500",
@@ -297,7 +286,13 @@ const VideoCall = React.memo(function VideoCall({
             className="h-full w-full object-cover"
           />
         </div>
-        <CallTimer />
+        <div
+          className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-black/60 px-4 py-1 text-sm text-white"
+          aria-live="polite"
+        >
+          {String(minutes).padStart(2, "0")}:
+          {String(seconds).padStart(2, "0")}
+        </div>
         <div className="absolute right-4 top-4 flex items-center gap-2 rounded-full bg-black/60 px-3 py-1">
           <span
             className={`h-2 w-2 rounded-full ${qualityColor[quality]}`}
@@ -336,6 +331,4 @@ const VideoCall = React.memo(function VideoCall({
       </div>
     </div>
   );
-});
-
-export default VideoCall;
+}

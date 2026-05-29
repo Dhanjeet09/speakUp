@@ -19,7 +19,7 @@ const config: Config = {
         surface: "#F5F4F0",
       },
       fontFamily: {
-        sans: ["var(--font-inter)", "system-ui", "sans-serif"],
+        sans: ["Inter", "sans-serif"],
       },
       borderRadius: {
         DEFAULT: "8px",
