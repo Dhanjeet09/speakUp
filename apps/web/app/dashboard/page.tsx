@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -89,8 +89,9 @@ export default function DashboardPage() {
           <Card>
             <CardContent className="pt-6">
               <p className="text-sm text-gray-500">Current Streak</p>
-              <p className="text-2xl font-bold">
-                {profile.currentStreak} day{profile.currentStreak !== 1 ? "s" : ""}
+              <p className="text-2xl font-bold text-teal-600">
+                <span className="inline-block animate-bounce">🔥</span>{" "}
+                <CountUp value={profile.currentStreak} /> day{profile.currentStreak !== 1 ? "s" : ""}
               </p>
             </CardContent>
           </Card>
@@ -163,4 +164,25 @@ export default function DashboardPage() {
       </main>
     </>
   );
+}
+
+function CountUp({ value }: { value: number }) {
+  const [display, setDisplay] = useState(0);
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    const duration = 800;
+    const start = performance.now();
+    function frame(now: number) {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      setDisplay(Math.floor(progress * value));
+      if (progress < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }, [value]);
+
+  return <>{display}</>;
 }
