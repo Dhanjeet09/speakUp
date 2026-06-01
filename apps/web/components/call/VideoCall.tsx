@@ -14,6 +14,7 @@ import {
   toggleCamera,
   endCall,
   mapPeerError,
+  startSpeakingDetection,
 } from "@/lib/webrtc";
 import { Button } from "@/components/ui/button";
 import ReportModal from "./ReportModal";
@@ -36,6 +37,7 @@ export default function VideoCall({
   onEndCall,
 }: VideoCallProps) {
   const [showReport, setShowReport] = useState(false);
+  const [remoteSpeaking, setRemoteSpeaking] = useState(false);
   const { user } = useAuthStore();
   const { isMuted, isCameraOff, setIsMuted, setIsCameraOff } = useCallStore();
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -47,6 +49,7 @@ export default function VideoCall({
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const onEndCallRef = useRef(onEndCall);
   onEndCallRef.current = onEndCall;
+  const stopDetectionRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!("mediaDevices" in navigator)) {
@@ -78,6 +81,10 @@ export default function VideoCall({
             if (!cancelled && remoteVideoRef.current) {
               remoteVideoRef.current.srcObject = remoteStream;
             }
+            stopDetectionRef.current = startSpeakingDetection(
+              remoteStream,
+              setRemoteSpeaking
+            );
           });
         }
 
@@ -120,6 +127,10 @@ export default function VideoCall({
                 if (remoteVideoRef.current) {
                   remoteVideoRef.current.srcObject = remoteStream;
                 }
+                stopDetectionRef.current = startSpeakingDetection(
+                  remoteStream,
+                  setRemoteSpeaking
+                );
               } else {
                 await callPromise;
               }
@@ -151,6 +162,10 @@ export default function VideoCall({
 
     return () => {
       cancelled = true;
+      if (stopDetectionRef.current) {
+        stopDetectionRef.current();
+        stopDetectionRef.current = null;
+      }
       endCall();
       peerRef.current = null;
     };
@@ -276,7 +291,13 @@ export default function VideoCall({
 
   return (
     <div className="relative w-full">
-      <div className="relative aspect-video w-full overflow-hidden rounded-card bg-black">
+      <div
+        className={`relative aspect-video w-full overflow-hidden rounded-card bg-black ${
+          remoteSpeaking
+            ? "animate-pulse shadow-[0_0_0_4px_rgba(29,158,117,0.3)] ring-2 ring-[#1D9E75] ring-offset-4"
+            : ""
+        }`}
+      >
         <video
           ref={remoteVideoRef}
           autoPlay

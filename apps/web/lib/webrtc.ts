@@ -148,6 +148,51 @@ export function endCall(): void {
   }
 }
 
+let audioAnalyzer: {
+  context: AudioContext;
+  analyser: AnalyserNode;
+  dataArray: Uint8Array;
+} | null = null;
+
+export function startSpeakingDetection(
+  stream: MediaStream,
+  onSpeaking: (speaking: boolean) => void
+): () => void {
+  try {
+    const context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 256;
+    const source = context.createMediaStreamSource(stream);
+    source.connect(analyser);
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    audioAnalyzer = { context, analyser, dataArray } as typeof audioAnalyzer;
+    let lastSpeaking = false;
+
+    const interval = setInterval(() => {
+      if (!audioAnalyzer) return;
+      audioAnalyzer.analyser.getByteFrequencyData(audioAnalyzer.dataArray as unknown as Uint8Array<ArrayBuffer>);
+      const avg =
+        audioAnalyzer.dataArray.reduce((a, b) => a + b, 0) /
+        audioAnalyzer.dataArray.length;
+      const speaking = avg > 10;
+      if (speaking !== lastSpeaking) {
+        lastSpeaking = speaking;
+        onSpeaking(speaking);
+      }
+    }, 150);
+
+    return () => {
+      clearInterval(interval);
+      if (audioAnalyzer) {
+        audioAnalyzer.context.close();
+        audioAnalyzer = null;
+      }
+    };
+  } catch {
+    return () => {};
+  }
+}
+
 export function mapPeerError(err: { type: string; message: string }): PeerError {
   switch (err.type) {
     case "network":
