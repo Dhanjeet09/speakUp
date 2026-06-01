@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { reportUser, blockUser } from "@/lib/api/reports";
 import toast from "react-hot-toast";
@@ -29,28 +29,31 @@ export default function ReportModal({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [alsoBlock, setAlsoBlock] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const el = dialogRef.current;
-    if (!el) return;
-    const focusable = el.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    first?.focus();
+    cancelRef.current?.focus();
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "Tab") return;
-      if (e.shiftKey) {
-        if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
-      } else {
-        if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      if (e.key === "Escape") { e.stopPropagation(); onClose(); return; }
+      if (e.key !== "Tab" || !modalRef.current) return;
+      const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+        'button, input, textarea, select, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
       }
     }
-    el.addEventListener("keydown", onKey);
-    return () => el.removeEventListener("keydown", onKey);
-  }, []);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   async function handleSubmit() {
     if (!reason) return;
@@ -71,7 +74,7 @@ export default function ReportModal({
 
   return (
     <div
-      ref={dialogRef}
+      ref={modalRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       role="dialog"
       aria-modal="true"
@@ -132,7 +135,7 @@ export default function ReportModal({
         </label>
 
         <div className="mt-6 flex gap-3">
-          <Button variant="outline" onClick={onClose} className="flex-1">
+          <Button ref={cancelRef} variant="outline" onClick={onClose} className="flex-1">
             Cancel
           </Button>
           <Button

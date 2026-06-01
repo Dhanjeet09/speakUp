@@ -38,6 +38,8 @@ export default function VideoCall({
 }: VideoCallProps) {
   const [showReport, setShowReport] = useState(false);
   const [remoteSpeaking, setRemoteSpeaking] = useState(false);
+  const [remoteLoaded, setRemoteLoaded] = useState(false);
+  const [localLoaded, setLocalLoaded] = useState(false);
   const { user } = useAuthStore();
   const { isMuted, isCameraOff, setIsMuted, setIsCameraOff } = useCallStore();
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -303,28 +305,48 @@ export default function VideoCall({
   return (
     <div className="relative w-full">
       <div className="flex flex-col gap-2 sm:block">
-        <div
-          className={`relative aspect-video w-full overflow-hidden rounded-card bg-black ${
-            remoteSpeaking
-              ? "animate-pulse shadow-[0_0_0_4px_rgba(29,158,117,0.3)] ring-2 ring-[#1D9E75] ring-offset-4"
-              : ""
-          }`}
-        >
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="h-full w-full object-cover"
-          />
-        </div>
-        <div className="relative aspect-video w-full overflow-hidden rounded-lg border-2 border-white sm:absolute sm:bottom-4 sm:right-4 sm:h-32 sm:w-48 sm:border-white sm:shadow-lg">
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className="h-full w-full object-cover"
-          />
+          <div
+            className={`relative aspect-video w-full overflow-hidden rounded-card bg-black ${
+              remoteSpeaking
+                ? "animate-pulse shadow-[0_0_0_4px_rgba(29,158,117,0.3)] ring-2 ring-[#1D9E75] ring-offset-4"
+                : ""
+            }`}
+          >
+            {!remoteLoaded && (
+              <div className="flex h-full w-full animate-pulse items-center justify-center bg-gray-800">
+                <span className="text-3xl font-bold text-white/60">
+                  {partnerName.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                </span>
+              </div>
+            )}
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className="h-full w-full object-cover"
+              role="img"
+              aria-label={`Video of ${partnerName}`}
+              onLoadedData={() => setRemoteLoaded(true)}
+            />
+          </div>
+          <div className="relative aspect-video w-full overflow-hidden rounded-lg border-2 border-white sm:absolute sm:bottom-4 sm:right-4 sm:h-32 sm:w-48 sm:border-white sm:shadow-lg">
+            {!localLoaded && (
+              <div className="flex h-full w-full animate-pulse items-center justify-center bg-gray-800">
+                <span className="text-lg font-bold text-white/60">
+                  {user?.email?.charAt(0).toUpperCase() || "U"}
+                </span>
+              </div>
+            )}
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="h-full w-full object-cover"
+              role="img"
+              aria-label="Your camera feed"
+              onLoadedData={() => setLocalLoaded(true)}
+            />
         </div>
         <div
           className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-black/60 px-4 py-1 text-sm text-white"

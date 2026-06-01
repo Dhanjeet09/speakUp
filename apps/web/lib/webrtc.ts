@@ -193,6 +193,33 @@ export function startSpeakingDetection(
   }
 }
 
+export function startMicLevelDetection(
+  stream: MediaStream,
+  onLevel: (level: number) => void
+): () => void {
+  try {
+    const context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 256;
+    const source = context.createMediaStreamSource(stream);
+    source.connect(analyser);
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    const interval = setInterval(() => {
+      analyser.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+      onLevel(Math.min(100, Math.round((avg / 255) * 100)));
+    }, 100);
+
+    return () => {
+      clearInterval(interval);
+      context.close();
+    };
+  } catch {
+    return () => {};
+  }
+}
+
 export function mapPeerError(err: { type: string; message: string }): PeerError {
   switch (err.type) {
     case "network":

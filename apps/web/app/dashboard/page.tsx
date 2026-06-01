@@ -125,16 +125,9 @@ export default function DashboardPage() {
                 <Skeleton className="h-12 w-full" />
               </div>
             ) : recentSessions.length === 0 ? (
-              <div className="text-center">
-                <p className="text-sm text-gray-500">
-                  No sessions this week. Consistency is everything.
-                </p>
-                <Link href="/match">
-                  <Button variant="outline" className="mt-3">
-                    Find a Partner
-                  </Button>
-                </Link>
-              </div>
+              <p className="text-sm text-gray-500">
+                No sessions yet. Find a partner to start!
+              </p>
             ) : (
               <div className="space-y-3">
                 {recentSessions.map((s: any) => (

@@ -1,4 +1,4 @@
-import { get, put } from "./client";
+import { get, patch } from "./client";
 
 export interface UserProfile {
   id: string;
@@ -18,5 +18,9 @@ export function getUser(userId: string) {
 }
 
 export function updateUser(userId: string, data: Partial<UserProfile>) {
-  return put<{ user: UserProfile }>(`/api/users/${userId}`, data);
+  return patch<{ user: UserProfile }>(`/api/users/${userId}`, data);
+}
+
+export function getBlockedIds(userId: string) {
+  return get<{ blockedIds: string[] }>(`/api/users/${userId}/blocks`);
 }

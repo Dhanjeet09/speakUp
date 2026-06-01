@@ -55,13 +55,34 @@ export default function ProfilePage() {
       <>
         <Navbar />
         <main className="mx-auto max-w-2xl px-4 py-8 text-center">
-          <p className="text-gray-500">User not found</p>
+          <div className="flex flex-col items-center gap-4">
+            <p className="text-gray-500">User not found</p>
+          </div>
         </main>
       </>
     );
   }
 
   const isOwnProfile = user?.id === profile.id;
+
+  if (isOwnProfile && profile.totalSessions === 0) {
+    return (
+      <>
+        <Navbar />
+        <main className="mx-auto max-w-2xl px-4 py-8 text-center">
+          <div className="mx-auto max-w-sm">
+            <h1 className="text-2xl font-bold">{profile.name || "Your Profile"}</h1>
+            <p className="mt-4 text-gray-500">
+              Start speaking to build your story.
+            </p>
+            <Link href="/match" className="mt-6 inline-block">
+              <Button>Find a Partner</Button>
+            </Link>
+          </div>
+        </main>
+      </>
+    );
+  }
 
   return (
     <>

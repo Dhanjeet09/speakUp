@@ -10,11 +10,12 @@ import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 import { getTodaysTopic } from "@/lib/topics";
 import { createSession } from "@/lib/api/sessions";
 import Navbar from "@/components/layout/Navbar";
-import MicLevelIndicator from "@/components/ui/MicLevelIndicator";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import toast from "react-hot-toast";
+import confetti from "canvas-confetti";
+import { startMicLevelDetection } from "@/lib/webrtc";
 
 const VideoCall = dynamic(() => import("@/components/call/VideoCall"), {
   ssr: false,
@@ -47,9 +48,76 @@ export default function MatchPage() {
   const [searchTimer, setSearchTimer] = useState(0);
   const [partnerPeerId, setPartnerPeerId] = useState("");
   const [partnerUserId, setPartnerUserId] = useState("");
+  const [ratingTimer, setRatingTimer] = useState(0);
+  const [micLevel, setMicLevel] = useState(0);
+  const ratingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopMicRef = useRef<(() => void) | null>(null);
 
   const handleEndCallRef = useRef<() => void>(() => {});
   const sessionCreatedRef = useRef(false);
+  const confettiFiredRef = useRef(false);
+
+  useEffect(() => {
+    if (state === "MATCHED" && !confettiFiredRef.current) {
+      confettiFiredRef.current = true;
+      confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
+    }
+    if (state !== "MATCHED") confettiFiredRef.current = false;
+  }, [state]);
+
+  useEffect(() => {
+    if (state === "ENDED") {
+      setRatingTimer(5);
+      ratingIntervalRef.current = setInterval(() => {
+        setRatingTimer((prev) => {
+          if (prev <= 1) {
+            if (ratingIntervalRef.current) clearInterval(ratingIntervalRef.current);
+            ratingIntervalRef.current = null;
+            reset();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (ratingIntervalRef.current) {
+        clearInterval(ratingIntervalRef.current);
+        ratingIntervalRef.current = null;
+      }
+    };
+  }, [state, reset]);
+
+  useEffect(() => {
+    if (state !== "IDLE") {
+      if (stopMicRef.current) {
+        stopMicRef.current();
+        stopMicRef.current = null;
+      }
+      setMicLevel(0);
+      return;
+    }
+    let cancelled = false;
+    async function initMic() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        stopMicRef.current = startMicLevelDetection(stream, (level) => {
+          if (!cancelled) setMicLevel(level);
+        });
+      } catch {
+        setMicLevel(-1);
+      }
+    }
+    initMic();
+    return () => {
+      cancelled = true;
+      if (stopMicRef.current) {
+        stopMicRef.current();
+        stopMicRef.current = null;
+      }
+    };
+  }, [state]);
 
   useEffect(() => {
     if (!user) {
@@ -169,8 +237,8 @@ export default function MatchPage() {
     }
 
     try {
-      const { put } = await import("@/lib/api/client");
-      await put(`/sessions/${roomId}/rating`, { positive, userId: user.id });
+      const { patch } = await import("@/lib/api/client");
+      await patch(`/api/sessions/${roomId}/rate`, { positive });
     } catch {
     }
 
@@ -179,6 +247,10 @@ export default function MatchPage() {
   }
 
   function handleSkipRating() {
+    if (ratingIntervalRef.current) {
+      clearInterval(ratingIntervalRef.current);
+      ratingIntervalRef.current = null;
+    }
     reset();
   }
 
@@ -195,6 +267,17 @@ export default function MatchPage() {
                 <p className="mt-2 text-gray-600">{topic}</p>
               </CardContent>
             </Card>
+            {micLevel >= 0 && (
+              <div className="w-full max-w-md">
+                <p className="mb-1 text-xs text-gray-500">Mic level</p>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                  <div
+                    className="h-full rounded-full bg-teal-500 transition-all duration-100"
+                    style={{ width: `${micLevel}%` }}
+                  />
+                </div>
+              </div>
+            )}
             <Button size="lg" onClick={handleJoinQueue}>
               Find a Partner
             </Button>
@@ -214,10 +297,7 @@ export default function MatchPage() {
                     ? "Expanding search to same level..."
                     : "Searching adjacent levels..."}
                 </p>
-                <div className="flex items-center gap-2">
-                  <p className="text-lg font-bold text-primary">{searchTimer}s</p>
-                  <MicLevelIndicator />
-                </div>
+                <p className="text-lg font-bold text-primary">{searchTimer}s</p>
                 <p className="text-sm text-gray-400">
                   {waitingCount} other{waitingCount !== 1 ? "s" : ""} in queue
                 </p>
@@ -249,7 +329,7 @@ export default function MatchPage() {
         )}
 
         {state === "MATCHED" && partner && (
-          <div className="flex flex-col items-center gap-4">
+          <div className="flex flex-col items-center gap-4" aria-live="polite">
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 text-3xl">
               {partner.country ? getFlagEmoji(partner.country) : "🎉"}
             </div>
@@ -291,23 +371,23 @@ export default function MatchPage() {
             <h2 className="text-xl font-bold">Session ended</h2>
             <p className="text-gray-500">How was your session?</p>
             <div className="flex gap-4">
-              <button
+              <Button
+                variant="success"
                 onClick={() => handleRating(true)}
-                className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-gray-300 text-2xl transition-all duration-200 hover:scale-110 hover:border-teal-500 hover:bg-teal-50 active:scale-95"
-                aria-label="Thumbs up"
+                className="px-8 transition-transform hover:scale-110"
               >
-                👍
-              </button>
-              <button
+                Thumbs Up
+              </Button>
+              <Button
+                variant="danger"
                 onClick={() => handleRating(false)}
-                className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-gray-300 text-2xl transition-all duration-200 hover:scale-110 hover:border-danger hover:bg-red-50 active:scale-95"
-                aria-label="Thumbs down"
+                className="px-8 transition-transform hover:scale-110"
               >
-                👎
-              </button>
+                Thumbs Down
+              </Button>
             </div>
             <Button variant="ghost" onClick={handleSkipRating}>
-              Skip
+              {ratingTimer > 0 ? `Skip (${ratingTimer}s)` : "Skip"}
             </Button>
           </div>
         )}

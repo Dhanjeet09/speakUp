@@ -69,14 +69,18 @@ export default function LoginPage() {
         </p>
 
         <form onSubmit={handleEmailLogin} className="mt-8 flex flex-col gap-4">
+          <label htmlFor="login-email" className="sr-only">Email</label>
           <Input
+            id="login-email"
             type="email"
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
           />
+          <label htmlFor="login-password" className="sr-only">Password</label>
           <Input
+            id="login-password"
             type="password"
             placeholder="Password"
             value={password}

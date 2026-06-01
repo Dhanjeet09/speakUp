@@ -40,7 +40,7 @@ router.get(
   })
 );
 
-router.put(
+router.patch(
   "/:id",
   requireAuth,
   requireSameUser,
@@ -62,6 +62,22 @@ router.put(
     });
 
     res.json({ success: true, data: { user } });
+  })
+);
+
+router.get(
+  "/:id/blocks",
+  requireAuth,
+  requireSameUser,
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const blocks = await prisma.block.findMany({
+      where: { blockerId: req.params.id },
+      select: { blockedId: true },
+    });
+    res.json({
+      success: true,
+      data: { blockedIds: blocks.map((b) => b.blockedId) },
+    });
   })
 );
 

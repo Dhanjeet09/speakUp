@@ -70,9 +70,9 @@ export default function LandingPage() {
             )}
           </div>
           <div className="mt-6 flex items-center gap-2 text-sm text-gray-500">
-            <span className="inline-block h-2 w-2 rounded-full bg-success" />
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-success" />
             {onlineCount > 0
-              ? `${onlineCount} users online now`
+              ? `${onlineCount} speaking right now`
               : "Connecting..."}
           </div>
         </section>

@@ -87,11 +87,11 @@ router.get(
   })
 );
 
-router.put(
-  "/:roomId/rating",
+router.patch(
+  "/:roomUrl/rate",
   requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const { roomId } = req.params;
+    const { roomUrl } = req.params;
     const { positive } = req.body;
 
     if (typeof positive !== "boolean") {
@@ -99,7 +99,7 @@ router.put(
     }
 
     const session = await prisma.session.findFirst({
-      where: { roomUrl: roomId },
+      where: { roomUrl },
     });
 
     if (!session) {

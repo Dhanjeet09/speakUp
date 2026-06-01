@@ -10,7 +10,7 @@ const VALID_REASONS = [
 export const createReportSchema = z.object({
   reportedId: z.string().min(1),
   reason: z.enum(VALID_REASONS),
-  note: z.string().max(500).optional(),
+  note: z.string().max(280).optional(),
 });
 
 export const blockUserSchema = z.object({

@@ -98,6 +98,13 @@ export function put<T>(endpoint: string, body?: unknown) {
   });
 }
 
+export function patch<T>(endpoint: string, body?: unknown) {
+  return callApi<T>(endpoint, {
+    method: "PATCH",
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
 export function del<T>(endpoint: string) {
   return callApi<T>(endpoint, { method: "DELETE" });
 }
