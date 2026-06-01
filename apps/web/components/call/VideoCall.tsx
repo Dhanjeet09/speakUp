@@ -16,9 +16,12 @@ import {
   mapPeerError,
 } from "@/lib/webrtc";
 import { Button } from "@/components/ui/button";
+import ReportModal from "./ReportModal";
 
 interface VideoCallProps {
   partnerPeerId: string;
+  partnerUserId: string;
+  partnerName: string;
   isCaller: boolean;
   onEndCall: () => void;
 }
@@ -27,9 +30,12 @@ type ConnectionQuality = "good" | "fair" | "poor";
 
 export default function VideoCall({
   partnerPeerId,
+  partnerUserId,
+  partnerName,
   isCaller,
   onEndCall,
 }: VideoCallProps) {
+  const [showReport, setShowReport] = useState(false);
   const { user } = useAuthStore();
   const { isMuted, isCameraOff, setIsMuted, setIsCameraOff } = useCallStore();
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -321,6 +327,14 @@ export default function VideoCall({
           {isCameraOff ? "📷" : "🎥"}
         </Button>
         <Button
+          variant="outline"
+          onClick={() => setShowReport(true)}
+          className="h-12 w-12 rounded-full"
+          aria-label="Report user"
+        >
+          ⚑
+        </Button>
+        <Button
           variant="danger"
           onClick={handleEndCall}
           className="h-12 w-12 rounded-full"
@@ -329,6 +343,14 @@ export default function VideoCall({
           📞
         </Button>
       </div>
+      {showReport && (
+        <ReportModal
+          partnerUserId={partnerUserId}
+          partnerName={partnerName}
+          onClose={() => setShowReport(false)}
+          onEndCall={handleEndCall}
+        />
+      )}
     </div>
   );
 }

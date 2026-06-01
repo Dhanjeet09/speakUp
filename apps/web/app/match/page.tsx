@@ -251,6 +251,8 @@ export default function MatchPage() {
 
             <VideoCall
               partnerPeerId={partnerPeerId}
+              partnerUserId={partnerUserId}
+              partnerName={partner?.name || "Partner"}
               isCaller={isCaller}
               onEndCall={handleEndCall}
             />
