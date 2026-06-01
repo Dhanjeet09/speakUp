@@ -202,22 +202,45 @@ export default function MatchPage() {
 
         {state === "SEARCHING" && (
           <div className="flex flex-col items-center gap-6">
-            <div className="h-16 w-16 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-            <h2 className="text-xl font-semibold">Finding your match...</h2>
-            <p className="text-sm text-gray-500">
-              {searchTimer < 30
-                ? "Looking for someone with similar interests..."
-                : searchTimer < 45
-                ? "Expanding search to same level..."
-                : "Searching adjacent levels..."}
-            </p>
-            <p className="text-lg font-bold text-primary">{searchTimer}s</p>
-            <p className="text-sm text-gray-400">
-              {waitingCount} other{waitingCount !== 1 ? "s" : ""} in queue
-            </p>
-            <Button variant="outline" onClick={handleLeaveQueue}>
-              Cancel
-            </Button>
+            {searchTimer < 90 ? (
+              <>
+                <div className="h-16 w-16 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                <h2 className="text-xl font-semibold">Finding your match...</h2>
+                <p className="text-sm text-gray-500">
+                  {searchTimer < 30
+                    ? "Looking for someone with similar interests..."
+                    : searchTimer < 45
+                    ? "Expanding search to same level..."
+                    : "Searching adjacent levels..."}
+                </p>
+                <p className="text-lg font-bold text-primary">{searchTimer}s</p>
+                <p className="text-sm text-gray-400">
+                  {waitingCount} other{waitingCount !== 1 ? "s" : ""} in queue
+                </p>
+                <Button variant="outline" onClick={handleLeaveQueue}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 text-2xl">
+                  ⏰
+                </div>
+                <h2 className="text-xl font-semibold">No partners available right now</h2>
+                <p className="max-w-sm text-center text-sm text-gray-500">
+                  No one is searching at your level right now. Try expanding your interests or check back later.
+                </p>
+                <p className="text-lg font-bold text-gray-400">{searchTimer}s</p>
+                <div className="flex gap-3">
+                  <Button variant="outline" onClick={handleLeaveQueue}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleJoinQueue}>
+                    Try Again
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
