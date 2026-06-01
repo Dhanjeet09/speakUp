@@ -265,6 +265,17 @@ export default function VideoCall({
     onEndCallRef.current();
   }, []);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "m" || e.key === "M") handleMute();
+      else if (e.key === "c" || e.key === "C") handleCamera();
+      else if (e.key === "Escape") handleEndCall();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleMute, handleCamera, handleEndCall]);
+
   const duration = useCallStore((s) => s.durationSeconds);
   const minutes = Math.floor(duration / 60);
   const seconds = duration % 60;
