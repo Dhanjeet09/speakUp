@@ -195,15 +195,12 @@ export default function OnboardingPage() {
             Set your display name and country.
           </p>
           <div className="mt-6 flex flex-col gap-4">
-            <label htmlFor="onboarding-name" className="sr-only">Display name</label>
             <Input
-              id="onboarding-name"
               placeholder="Display name"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-            <label htmlFor="onboarding-country" className="sr-only">Country</label>
-            <Select id="onboarding-country" value={country} onChange={(e) => setCountry(e.target.value)}>
+            <Select value={country} onChange={(e) => setCountry(e.target.value)}>
               <option value="">Select your country</option>
               {countries.map((c) => (
                 <option key={c} value={c}>

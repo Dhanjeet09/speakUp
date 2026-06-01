@@ -71,18 +71,14 @@ export default function SignupPage() {
         </p>
 
         <form onSubmit={handleEmailSignup} className="mt-8 flex flex-col gap-4">
-          <label htmlFor="signup-email" className="sr-only">Email</label>
           <Input
-            id="signup-email"
             type="email"
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-          <label htmlFor="signup-password" className="sr-only">Password</label>
           <Input
-            id="signup-password"
             type="password"
             placeholder="Password (min 6 characters)"
             value={password}
