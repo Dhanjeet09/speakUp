@@ -291,20 +291,22 @@ export default function VideoCall({
 
   return (
     <div className="relative w-full">
-      <div
-        className={`relative aspect-video w-full overflow-hidden rounded-card bg-black ${
-          remoteSpeaking
-            ? "animate-pulse shadow-[0_0_0_4px_rgba(29,158,117,0.3)] ring-2 ring-[#1D9E75] ring-offset-4"
-            : ""
-        }`}
-      >
-        <video
-          ref={remoteVideoRef}
-          autoPlay
-          playsInline
-          className="h-full w-full object-cover"
-        />
-        <div className="absolute bottom-4 right-4 h-32 w-48 overflow-hidden rounded-lg border-2 border-white shadow-lg">
+      <div className="flex flex-col gap-2 sm:block">
+        <div
+          className={`relative aspect-video w-full overflow-hidden rounded-card bg-black ${
+            remoteSpeaking
+              ? "animate-pulse shadow-[0_0_0_4px_rgba(29,158,117,0.3)] ring-2 ring-[#1D9E75] ring-offset-4"
+              : ""
+          }`}
+        >
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            className="h-full w-full object-cover"
+          />
+        </div>
+        <div className="relative aspect-video w-full overflow-hidden rounded-lg border-2 border-white sm:absolute sm:bottom-4 sm:right-4 sm:h-32 sm:w-48 sm:border-white sm:shadow-lg">
           <video
             ref={localVideoRef}
             autoPlay
