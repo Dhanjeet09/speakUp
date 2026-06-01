@@ -77,7 +77,15 @@ app.use(requestLogger);
 
 app.set("trust proxy", 1);
 
-app.use("/api/auth", authRoutes);
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many auth requests, please try again later" },
+});
+
+app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/sessions", sessionsRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/reports", reportsRoutes);

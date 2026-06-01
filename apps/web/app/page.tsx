@@ -59,7 +59,7 @@ export default function LandingPage() {
           </p>
           <div className="mt-8 flex items-center gap-4">
             <Link href={user ? "/dashboard" : "/signup"}>
-              <Button size="lg">Start Speaking Now</Button>
+              <Button size="lg">Start speaking now</Button>
             </Link>
             {!user && (
               <Link href="/login">
