@@ -11,12 +11,12 @@ import { Select } from "@/components/ui/select";
 import toast from "react-hot-toast";
 
 const levels = [
-  { id: "A1", label: "Beginner", desc: "I know basic words and phrases" },
-  { id: "A2", label: "Elementary", desc: "I can introduce myself and talk about simple topics" },
-  { id: "B1", label: "Intermediate", desc: "I can handle everyday conversations" },
-  { id: "B2", label: "Upper Intermediate", desc: "I can speak fluently on familiar topics" },
-  { id: "C1", label: "Advanced", desc: "I can express ideas spontaneously" },
-  { id: "C2", label: "Proficient", desc: "I speak nearly like a native speaker" },
+  { id: "A1", label: "Beginner", desc: "A1 - Beginner: Can understand and use basic phrases" },
+  { id: "A2", label: "Elementary", desc: "A2 - Elementary: Can introduce themselves and discuss simple topics" },
+  { id: "B1", label: "Intermediate", desc: "B1 - Intermediate: Can handle everyday conversations" },
+  { id: "B2", label: "Upper Intermediate", desc: "B2 - Upper Intermediate: Can discuss most topics fluently" },
+  { id: "C1", label: "Advanced", desc: "C1 - Advanced: Can express ideas spontaneously and fluently" },
+  { id: "C2", label: "Proficient", desc: "C2 - Proficient: Can understand and speak nearly like a native speaker" },
 ];
 
 const interestOptions = [

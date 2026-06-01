@@ -278,6 +278,19 @@ export default function VideoCall({
     return () => window.removeEventListener("keydown", onKey);
   }, [handleMute, handleCamera, handleEndCall]);
 
+  useEffect(() => {
+    function onResize() {
+      // Force reflow on orientation change — CSS handles the layout
+      document.body.style.height = window.innerHeight + "px";
+    }
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", () => setTimeout(onResize, 300));
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+    };
+  }, []);
+
   const duration = useCallStore((s) => s.durationSeconds);
   const minutes = Math.floor(duration / 60);
   const seconds = duration % 60;

@@ -88,10 +88,10 @@ router.get(
 );
 
 router.patch(
-  "/:roomUrl/rate",
+  "/:id/rate",
   requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const { roomUrl } = req.params;
+    const { id: roomUrl } = req.params;
     const { positive } = req.body;
 
     if (typeof positive !== "boolean") {

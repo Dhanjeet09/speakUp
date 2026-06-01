@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type MatchState = "IDLE" | "SEARCHING" | "MATCHED" | "IN_CALL" | "ENDED";
+export type MatchState = "IDLE" | "PERMISSION_CHECK" | "SEARCHING" | "MATCHED" | "IN_CALL" | "ENDED";
 
 export interface Partner {
   name: string;

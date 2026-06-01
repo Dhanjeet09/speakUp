@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import Navbar from "@/components/layout/Navbar";
 import { getTodaysTopic } from "@/lib/topics";
+import { blockUser } from "@/lib/api/reports";
+import toast from "react-hot-toast";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -126,37 +128,58 @@ export default function DashboardPage() {
               </div>
             ) : recentSessions.length === 0 ? (
               <p className="text-sm text-gray-500">
-                No sessions yet. Find a partner to start!
+                No sessions this week. Consistency is everything.
               </p>
             ) : (
               <div className="space-y-3">
-                {recentSessions.map((s: any) => (
-                  <div
-                    key={s.id}
-                    className="flex items-center justify-between rounded-lg border border-gray-100 p-3"
-                  >
-                    <div>
-                      <p className="text-sm font-medium">
-                        {s.topicUsed || "Free talk"}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {new Date(s.createdAt).toLocaleDateString()} &middot;{" "}
-                        {Math.floor(s.durationSeconds / 60)} min
-                      </p>
-                    </div>
-                    <Badge
-                      variant={
-                        s.user1Rating === true || s.user2Rating === true
-                          ? "success"
-                          : "outline"
-                      }
+                {recentSessions.map((s: any) => {
+                  const partnerId = s.user1Id === user?.id ? s.user2Id : s.user1Id;
+                  return (
+                    <div
+                      key={s.id}
+                      className="flex items-center justify-between rounded-lg border border-gray-100 p-3"
                     >
-                      {s.user1Rating !== null || s.user2Rating !== null
-                        ? "Rated"
-                        : "No rating"}
-                    </Badge>
-                  </div>
-                ))}
+                      <div>
+                        <p className="text-sm font-medium">
+                          {s.topicUsed || "Free talk"}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {new Date(s.createdAt).toLocaleDateString()} &middot;{" "}
+                          {Math.floor(s.durationSeconds / 60)} min
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant={
+                            s.user1Rating === true || s.user2Rating === true
+                              ? "success"
+                              : "outline"
+                          }
+                        >
+                          {s.user1Rating !== null || s.user2Rating !== null
+                            ? "Rated"
+                            : "No rating"}
+                        </Badge>
+                        {partnerId && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await blockUser(partnerId);
+                                toast.success("User blocked");
+                              } catch {
+                                toast.error("Failed to block user");
+                              }
+                            }}
+                            className="text-xs text-gray-400 underline hover:text-danger"
+                            aria-label="Block this user"
+                          >
+                            Block
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </CardContent>

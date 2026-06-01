@@ -50,8 +50,10 @@ export default function MatchPage() {
   const [partnerUserId, setPartnerUserId] = useState("");
   const [ratingTimer, setRatingTimer] = useState(0);
   const [micLevel, setMicLevel] = useState(0);
+  const [showFlash, setShowFlash] = useState(false);
   const ratingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopMicRef = useRef<(() => void) | null>(null);
+  const ratingRef = useRef<HTMLDivElement>(null);
 
   const handleEndCallRef = useRef<() => void>(() => {});
   const sessionCreatedRef = useRef(false);
@@ -61,8 +63,13 @@ export default function MatchPage() {
     if (state === "MATCHED" && !confettiFiredRef.current) {
       confettiFiredRef.current = true;
       confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
+      setShowFlash(true);
+      setTimeout(() => setShowFlash(false), 600);
     }
-    if (state !== "MATCHED") confettiFiredRef.current = false;
+    if (state !== "MATCHED") {
+      confettiFiredRef.current = false;
+      setShowFlash(false);
+    }
   }, [state]);
 
   useEffect(() => {
@@ -87,6 +94,30 @@ export default function MatchPage() {
       }
     };
   }, [state, reset]);
+
+  useEffect(() => {
+    if (state !== "ENDED") return;
+    const el = ratingRef.current;
+    if (!el) return;
+    const focusable = el.querySelectorAll<HTMLElement>("button");
+    if (focusable[0]) focusable[0].focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Tab") return;
+      const container = ratingRef.current;
+      if (!container) return;
+      const f = container.querySelectorAll<HTMLElement>("button");
+      if (f.length === 0) return;
+      if (e.shiftKey && document.activeElement === f[0]) {
+        e.preventDefault();
+        f[f.length - 1].focus();
+      } else if (!e.shiftKey && document.activeElement === f[f.length - 1]) {
+        e.preventDefault();
+        f[0].focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state]);
 
   useEffect(() => {
     if (state !== "IDLE") {
@@ -117,6 +148,23 @@ export default function MatchPage() {
         stopMicRef.current = null;
       }
     };
+  }, [state]);
+
+  useEffect(() => {
+    if (state !== "PERMISSION_CHECK") return;
+    let cancelled = false;
+    async function checkPermission() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        stream.getTracks().forEach((t) => t.stop());
+        proceedToSearch();
+      } catch {
+        if (!cancelled) setState("IDLE");
+      }
+    }
+    checkPermission();
+    return () => { cancelled = true; };
   }, [state]);
 
   useEffect(() => {
@@ -185,6 +233,11 @@ export default function MatchPage() {
   }, [state]);
 
   function handleJoinQueue() {
+    if (!user || !profile) return;
+    setState("PERMISSION_CHECK");
+  }
+
+  function proceedToSearch() {
     if (!user || !profile) return;
     const socket = connectSocket(user.id);
     socket.emit("joinQueue", {
@@ -284,6 +337,31 @@ export default function MatchPage() {
           </div>
         )}
 
+        {state === "PERMISSION_CHECK" && (
+          <div className="flex flex-col items-center gap-6">
+            <div className="h-16 w-16 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <h2 className="text-xl font-semibold">Checking permissions...</h2>
+            <p className="text-sm text-gray-500">
+              Please allow camera and microphone access when prompted by your browser.
+            </p>
+            <p className="text-xs text-gray-400">
+              {typeof navigator !== "undefined" &&
+              /Chrome/i.test(navigator.userAgent)
+                ? 'Click "Allow" in the pop-up near the address bar.'
+                : typeof navigator !== "undefined" &&
+                  /Firefox/i.test(navigator.userAgent)
+                ? 'Click "Allow" in the pop-up near the address bar.'
+                : typeof navigator !== "undefined" &&
+                  /Safari/i.test(navigator.userAgent)
+                ? 'Click "Allow" in the pop-up at the top of the page.'
+                : "Camera and microphone access is required for video calls."}
+            </p>
+            <Button variant="outline" onClick={() => setState("IDLE")}>
+              Cancel
+            </Button>
+          </div>
+        )}
+
         {state === "SEARCHING" && (
           <div className="flex flex-col items-center gap-6">
             {searchTimer < 90 ? (
@@ -329,7 +407,10 @@ export default function MatchPage() {
         )}
 
         {state === "MATCHED" && partner && (
-          <div className="flex flex-col items-center gap-4" aria-live="polite">
+          <div className="relative flex flex-col items-center gap-4" aria-live="polite">
+            {showFlash && (
+              <div className="absolute inset-0 z-10 animate-pulse rounded-full bg-green-500/20" />
+            )}
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 text-3xl">
               {partner.country ? getFlagEmoji(partner.country) : "🎉"}
             </div>
@@ -367,7 +448,7 @@ export default function MatchPage() {
         )}
 
         {state === "ENDED" && (
-          <div className="flex flex-col items-center gap-6" aria-live="polite">
+          <div ref={ratingRef} className="flex flex-col items-center gap-6" aria-live="polite">
             <h2 className="text-xl font-bold">Session ended</h2>
             <p className="text-gray-500">How was your session?</p>
             <div className="flex gap-4">
