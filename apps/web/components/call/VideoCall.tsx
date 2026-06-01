@@ -40,7 +40,7 @@ export default function VideoCall({
   const [remoteSpeaking, setRemoteSpeaking] = useState(false);
   const [remoteLoaded, setRemoteLoaded] = useState(false);
   const [localLoaded, setLocalLoaded] = useState(false);
-  const { user } = useAuthStore();
+  const { user, profile } = useAuthStore();
   const { isMuted, isCameraOff, setIsMuted, setIsCameraOff } = useCallStore();
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -319,7 +319,7 @@ export default function VideoCall({
     <div className="relative w-full">
       <div className="flex flex-col gap-2 sm:block">
           <div
-            className={`relative aspect-video w-full overflow-hidden rounded-card bg-black ${
+            className={`relative aspect-video w-full overflow-hidden rounded-card bg-black transition-shadow duration-200 ${
               remoteSpeaking
                 ? "animate-pulse shadow-[0_0_0_4px_rgba(29,158,117,0.3)] ring-2 ring-[#1D9E75] ring-offset-4"
                 : ""
@@ -346,7 +346,7 @@ export default function VideoCall({
             {!localLoaded && (
               <div className="flex h-full w-full animate-pulse items-center justify-center bg-gray-800">
                 <span className="text-lg font-bold text-white/60">
-                  {user?.email?.charAt(0).toUpperCase() || "U"}
+                  {profile?.name?.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() || "U"}
                 </span>
               </div>
             )}

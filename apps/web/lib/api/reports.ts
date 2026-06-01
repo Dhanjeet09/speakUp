@@ -5,5 +5,5 @@ export function reportUser(reportedId: string, reason: string, note?: string) {
 }
 
 export function blockUser(blockedId: string) {
-  return post("/api/reports/block", { blockedId });
+  return post(`/api/reports/${blockedId}/block`, {});
 }

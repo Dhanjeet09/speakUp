@@ -331,7 +331,7 @@ export default function MatchPage() {
                 </div>
               </div>
             )}
-            <Button size="lg" onClick={handleJoinQueue}>
+            <Button size="lg" onClick={handleJoinQueue} className="animate-pulse">
               Find a Partner
             </Button>
           </div>

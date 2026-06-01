@@ -2,7 +2,7 @@ import { Router, Response } from "express";
 import { prisma } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
-import { createReportSchema, blockUserSchema } from "../schemas";
+import { createReportSchema } from "../schemas";
 import { AppError, asyncHandler } from "../middleware/errorHandler";
 import { logInfo, logWarn } from "../lib/logger";
 import type { AuthenticatedRequest } from "../types";
@@ -37,11 +37,10 @@ router.post(
 );
 
 router.post(
-  "/block",
+  "/:userId/block",
   requireAuth,
-  validateZod(blockUserSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const { blockedId } = req.body;
+    const blockedId = req.params.userId;
 
     if (req.userId === blockedId) {
       throw new AppError("You cannot block yourself", 400);
