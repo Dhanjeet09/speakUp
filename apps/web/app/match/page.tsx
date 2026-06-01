@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import toast from "react-hot-toast";
+import confetti from "canvas-confetti";
 
 const VideoCall = dynamic(() => import("@/components/call/VideoCall"), {
   ssr: false,
@@ -49,6 +50,17 @@ export default function MatchPage() {
 
   const handleEndCallRef = useRef<() => void>(() => {});
   const sessionCreatedRef = useRef(false);
+  const confettiFiredRef = useRef(false);
+
+  useEffect(() => {
+    if (state === "MATCHED" && !confettiFiredRef.current) {
+      confettiFiredRef.current = true;
+      confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
+    }
+    if (state !== "MATCHED") {
+      confettiFiredRef.current = false;
+    }
+  }, [state]);
 
   useEffect(() => {
     if (!user) {
