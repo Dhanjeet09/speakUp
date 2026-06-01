@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { reportUser, blockUser } from "@/lib/api/reports";
 import toast from "react-hot-toast";
@@ -29,6 +29,28 @@ export default function ReportModal({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [alsoBlock, setAlsoBlock] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = dialogRef.current;
+    if (!el) return;
+    const focusable = el.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    first?.focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Tab") return;
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      }
+    }
+    el.addEventListener("keydown", onKey);
+    return () => el.removeEventListener("keydown", onKey);
+  }, []);
 
   async function handleSubmit() {
     if (!reason) return;
@@ -49,6 +71,7 @@ export default function ReportModal({
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       role="dialog"
       aria-modal="true"
@@ -91,10 +114,10 @@ export default function ReportModal({
             id="report-note"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            maxLength={500}
+            maxLength={280}
             rows={3}
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-            placeholder="What happened? (max 500 characters)"
+            placeholder="What happened? (max 280 characters)"
           />
         </div>
 

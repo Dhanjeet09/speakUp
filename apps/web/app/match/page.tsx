@@ -10,6 +10,7 @@ import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 import { getTodaysTopic } from "@/lib/topics";
 import { createSession } from "@/lib/api/sessions";
 import Navbar from "@/components/layout/Navbar";
+import MicLevelIndicator from "@/components/ui/MicLevelIndicator";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -213,7 +214,10 @@ export default function MatchPage() {
                     ? "Expanding search to same level..."
                     : "Searching adjacent levels..."}
                 </p>
-                <p className="text-lg font-bold text-primary">{searchTimer}s</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-lg font-bold text-primary">{searchTimer}s</p>
+                  <MicLevelIndicator />
+                </div>
                 <p className="text-sm text-gray-400">
                   {waitingCount} other{waitingCount !== 1 ? "s" : ""} in queue
                 </p>
@@ -283,24 +287,24 @@ export default function MatchPage() {
         )}
 
         {state === "ENDED" && (
-          <div className="flex flex-col items-center gap-6">
+          <div className="flex flex-col items-center gap-6" aria-live="polite">
             <h2 className="text-xl font-bold">Session ended</h2>
             <p className="text-gray-500">How was your session?</p>
             <div className="flex gap-4">
-              <Button
-                variant="success"
+              <button
                 onClick={() => handleRating(true)}
-                className="px-8"
+                className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-gray-300 text-2xl transition-all duration-200 hover:scale-110 hover:border-teal-500 hover:bg-teal-50 active:scale-95"
+                aria-label="Thumbs up"
               >
-                Thumbs Up
-              </Button>
-              <Button
-                variant="danger"
+                👍
+              </button>
+              <button
                 onClick={() => handleRating(false)}
-                className="px-8"
+                className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-gray-300 text-2xl transition-all duration-200 hover:scale-110 hover:border-danger hover:bg-red-50 active:scale-95"
+                aria-label="Thumbs down"
               >
-                Thumbs Down
-              </Button>
+                👎
+              </button>
             </div>
             <Button variant="ghost" onClick={handleSkipRating}>
               Skip
