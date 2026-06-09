@@ -105,7 +105,26 @@ export default function ProfilePage() {
               ))}
             </div>
           )}
+          {profile.username && (
+            <p className="mt-2 text-sm text-gray-500">@{profile.username}</p>
+          )}
         </div>
+
+        {(profile.bio || profile.timezone || profile.nativeLanguage) && (
+          <Card className="mt-6">
+            <CardContent className="pt-6 space-y-2">
+              {profile.bio && (
+                <p className="text-sm text-gray-700">{profile.bio}</p>
+              )}
+              {profile.timezone && (
+                <p className="text-xs text-gray-400">Timezone: {profile.timezone}</p>
+              )}
+              {profile.nativeLanguage && (
+                <p className="text-xs text-gray-400">Native language: {profile.nativeLanguage}</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           <Card>

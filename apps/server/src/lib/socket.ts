@@ -1,7 +1,8 @@
 import { Server as HttpServer } from "http";
 import { Server } from "socket.io";
-import { createSupabaseClient } from "./supabase";
-import { logInfo, logWarn, logError, logDebug } from "./logger";
+import { logInfo, logDebug, logWarn } from "./logger";
+import { createAnonSupabaseClient } from "./supabase";
+import { prisma } from "./db";
 
 let io: Server | null = null;
 
@@ -32,6 +33,30 @@ setInterval(() => {
   }
 }, 30000);
 
+const userCallMap = new Map<string, boolean>();
+export function isUserInCall(userId: string): boolean {
+  return userCallMap.has(userId);
+}
+export function setUserInCall(userId: string, inCall: boolean): void {
+  if (inCall) userCallMap.set(userId, true);
+  else userCallMap.delete(userId);
+}
+
+const userConnectionCount = new Map<string, number>();
+export function addUserConnection(userId: string): void {
+  const count = userConnectionCount.get(userId) || 0;
+  userConnectionCount.set(userId, count + 1);
+}
+export function removeUserConnection(userId: string): number {
+  const count = userConnectionCount.get(userId) || 0;
+  if (count <= 1) {
+    userConnectionCount.delete(userId);
+    return 0;
+  }
+  userConnectionCount.set(userId, count - 1);
+  return count - 1;
+}
+
 export function getIO(): Server {
   if (!io) {
     throw new Error("Socket.IO not initialized. Call initSocket first.");
@@ -48,32 +73,67 @@ export function initSocket(httpServer: HttpServer): Server {
     },
     pingInterval: 25000,
     pingTimeout: 20000,
+    perMessageDeflate: false,
   });
 
   io.use(async (socket, next) => {
     const userId = socket.handshake.auth?.userId as string | undefined;
+    const token = socket.handshake.auth?.token as string | undefined;
+
     if (!userId) {
       logDebug("Socket", "Anonymous connection", { socketId: socket.id });
       return next();
     }
 
+    if (!token) {
+      logWarn("Socket", "Token required for authenticated connections", { socketId: socket.id, userId });
+      return next(new Error("Authentication token required"));
+    }
+
     try {
-      const supabase = createSupabaseClient();
-      const { data, error } = await supabase.auth.admin.getUserById(userId);
+      const supabase = createAnonSupabaseClient();
+      const { data, error } = await supabase.auth.getUser(token);
       if (error || !data.user) {
-        logWarn("Socket", "Connection rejected: invalid user", { userId, error: String(error) });
-        return next(new Error("Invalid user authentication"));
+        logWarn("Socket", "Invalid token rejected", { socketId: socket.id, userId, error: String(error) });
+        return next(new Error("Invalid authentication token"));
       }
+      if (data.user.id !== userId) {
+        logWarn("Socket", "Token userId mismatch", { socketId: socket.id, claimedUserId: userId, tokenUserId: data.user.id });
+        return next(new Error("Authentication mismatch"));
+      }
+
+      const userRecord = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { isSuspended: true },
+      });
+
+      if (userRecord?.isSuspended) {
+        logWarn("Socket", "Suspended user rejected", { socketId: socket.id, userId });
+        return next(new Error("Account suspended"));
+      }
+
       socket.data.userId = userId;
-      logInfo("Socket", "User authenticated via socket", { userId, socketId: socket.id });
-      next();
+      logDebug("Socket", "Authenticated via token", { socketId: socket.id, userId });
+      return next();
     } catch (err) {
-      logError("Socket", "Socket auth verification failed", { userId, error: String(err) });
-      next(new Error("Authentication verification failed"));
+      logWarn("Socket", "Token verification exception", { socketId: socket.id, userId, error: String(err) });
+      return next(new Error("Authentication verification failed"));
     }
   });
 
   return io;
+}
+
+const JOIN_QUEUE_LIMIT_WINDOW = 5000;
+const joinQueueMap = new Map<string, number>();
+export function checkJoinQueueRate(userId: string): boolean {
+  const now = Date.now();
+  const lastJoin = joinQueueMap.get(userId);
+  if (lastJoin && now - lastJoin < JOIN_QUEUE_LIMIT_WINDOW) {
+    return false;
+  }
+  joinQueueMap.set(userId, now);
+  return true;
 }
 
 export { checkRateLimit };

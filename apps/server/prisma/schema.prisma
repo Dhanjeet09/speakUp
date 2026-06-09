@@ -8,6 +8,12 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum FriendshipStatus {
+  pending
+  accepted
+  blocked
+}
+
 enum EnglishLevel {
   A1
   A2
@@ -24,29 +30,48 @@ enum ReportReason {
   other
 }
 
+enum UserRole {
+  learner
+  moderator
+  admin
+}
+
 model User {
-  id             String    @id @default(cuid())
-  email          String    @unique
+  id             String       @id @default(cuid())
+  email          String       @unique
+  role           UserRole     @default(learner)
   name           String?
+  username       String?      @unique
   country        String?
+  timezone       String?
+  nativeLanguage String?
+  bio            String?
   avatarUrl      String?
   englishLevel   EnglishLevel?
   interests      String[]
-  createdAt      DateTime  @default(now())
-  totalMinutes   Int       @default(0)
-  totalSessions  Int       @default(0)
-  currentStreak  Int       @default(0)
+  createdAt      DateTime     @default(now())
+  totalMinutes   Int          @default(0)
+  totalSessions  Int          @default(0)
+  currentStreak  Int          @default(0)
   lastSessionDate DateTime?
+  isSuspended    Boolean      @default(false)
+  suspendedAt    DateTime?
+  suspensionReason String?
 
-  sessionsAsUser1 Session[] @relation("User1Sessions")
-  sessionsAsUser2 Session[] @relation("User2Sessions")
-  blocksMade      Block[]   @relation("BlockerBlocks")
-  blocksReceived  Block[]   @relation("BlockedBlocks")
-  reportsMade     Report[]  @relation("ReporterReports")
-  reportsReceived Report[]  @relation("ReportedReports")
+  sessionsAsUser1 Session[]    @relation("User1Sessions")
+  sessionsAsUser2 Session[]    @relation("User2Sessions")
+  blocksMade      Block[]      @relation("BlockerBlocks")
+  blocksReceived  Block[]      @relation("BlockedBlocks")
+  reportsMade     Report[]     @relation("ReporterReports")
+  reportsReceived Report[]     @relation("ReportedReports")
+  messagesSent    ChatMessage[] @relation("SenderMessages")
+  messagesReceived ChatMessage[] @relation("ReceiverMessages")
+  friendRequestsSent     Friendship[] @relation("SentFriendRequests")
+  friendRequestsReceived Friendship[] @relation("ReceivedFriendRequests")
 
   @@index([email])
   @@index([englishLevel])
+  @@index([username])
 }
 
 model Session {
@@ -66,6 +91,39 @@ model Session {
   @@index([user1Id, createdAt])
   @@index([user2Id, createdAt])
   @@index([createdAt])
+}
+
+model ChatMessage {
+  id         String    @id @default(cuid())
+  senderId   String
+  receiverId String
+  content    String
+  createdAt  DateTime  @default(now())
+  readAt     DateTime?
+
+  sender   User @relation("SenderMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceiverMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([senderId, receiverId, createdAt])
+}
+
+model Friendship {
+  id          String           @id @default(cuid())
+  requesterId String
+  addresseeId String
+  status      FriendshipStatus @default(pending)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  requester User @relation("SentFriendRequests", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee User @relation("ReceivedFriendRequests", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@index([requesterId])
+  @@index([addresseeId])
+  @@index([status])
 }
 
 model Block {

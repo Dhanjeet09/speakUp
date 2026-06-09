@@ -53,15 +53,12 @@ router.post(
             totalSessions: { increment: 1 },
           },
         }),
+        updateStreak(user1Id, tx),
+        updateStreak(user2Id, tx),
       ]);
 
       return session;
     });
-
-    await Promise.all([
-      updateStreak(user1Id),
-      updateStreak(user2Id),
-    ]);
 
     logInfo("Session", "Session created", { sessionId: result.id });
     res.status(201).json({ success: true, data: { session: result } });
@@ -74,16 +71,82 @@ router.get(
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { userId } = req.params;
 
+    const where = {
+      OR: [{ user1Id: userId }, { user2Id: userId }],
+    };
+
+    const [sessions, total] = await Promise.all([
+      prisma.session.findMany({
+        where,
+        include: {
+          user1: { select: { id: true, name: true, country: true } },
+          user2: { select: { id: true, name: true, country: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: Math.min(Number(req.query.limit) || 20, 100),
+        skip: Math.max(Number(req.query.offset) || 0, 0),
+      }),
+      prisma.session.count({ where }),
+    ]);
+
+    res.json({ success: true, data: { sessions, total } });
+  })
+);
+
+router.get(
+  "/:userId/ratings",
+  requireAuth,
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { userId } = req.params;
+
     const sessions = await prisma.session.findMany({
       where: {
-        OR: [{ user1Id: userId }, { user2Id: userId }],
+        OR: [
+          { user1Id: userId, user1Rating: { not: null } },
+          { user2Id: userId, user2Rating: { not: null } },
+        ],
+      },
+      select: {
+        id: true,
+        user1Id: true,
+        user2Id: true,
+        user1Rating: true,
+        user2Rating: true,
+        createdAt: true,
+        user1: { select: { id: true, name: true } },
+        user2: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: Math.min(Number(req.query.limit) || 20, 100),
+      take: Math.min(Number(req.query.limit) || 50, 100),
       skip: Math.max(Number(req.query.offset) || 0, 0),
     });
 
-    res.json({ success: true, data: { sessions } });
+    let positiveCount = 0;
+    let totalCount = 0;
+
+    for (const session of sessions) {
+      if (session.user1Id === userId && session.user1Rating !== null) {
+        totalCount++;
+        if (session.user1Rating) positiveCount++;
+      } else if (session.user2Id === userId && session.user2Rating !== null) {
+        totalCount++;
+        if (session.user2Rating) positiveCount++;
+      }
+    }
+
+    const averageRating = totalCount > 0 ? (positiveCount / totalCount) * 100 : null;
+
+    res.json({
+      success: true,
+      data: {
+        ratings: sessions,
+        stats: {
+          totalRatings: totalCount,
+          positiveRatings: positiveCount,
+          averageRating: averageRating !== null ? Math.round(averageRating) : null,
+        },
+      },
+    });
   })
 );
 
@@ -91,19 +154,19 @@ router.patch(
   "/:id/rate",
   requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const { id: roomUrl } = req.params;
+    const { id } = req.params;
     const { positive } = req.body;
 
     if (typeof positive !== "boolean") {
       throw new AppError("positive must be a boolean", 400);
     }
 
-    const session = await prisma.session.findFirst({
-      where: { roomUrl },
+    const session = await prisma.session.findUnique({
+      where: { id },
     });
 
     if (!session) {
-      res.json({ success: false, error: "Session not found" });
+      res.status(404).json({ success: false, error: "Session not found" });
       return;
     }
 
@@ -112,9 +175,14 @@ router.patch(
       throw new AppError("You are not a participant in this session", 403);
     }
 
+    const existingRating = isUser1 ? session.user1Rating : session.user2Rating;
+    if (existingRating !== null) {
+      throw new AppError("You have already rated this session", 409);
+    }
+
     const updateField = isUser1 ? "user1Rating" : "user2Rating";
     await prisma.session.update({
-      where: { id: session.id },
+      where: { id },
       data: { [updateField]: positive },
     });
 

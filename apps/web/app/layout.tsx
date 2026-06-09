@@ -3,7 +3,10 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import AuthProvider from "@/components/layout/AuthProvider";
+import Navbar from "@/components/layout/Navbar";
+import AppShell from "@/components/layout/AppShell";
 import OfflineBanner from "@/components/ui/OfflineBanner";
+import FriendCallHandler from "@/components/call/FriendCallHandler";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -24,18 +27,21 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} min-h-screen flex flex-col`}>
+      <body className={`${inter.className} min-h-screen`}>
         <AuthProvider>
           <OfflineBanner />
-          {children}
+          <FriendCallHandler />
+          <Navbar />
+          <AppShell>{children}</AppShell>
           <Toaster
             position="top-center"
             toastOptions={{
               duration: 4000,
               style: {
-                borderRadius: "8px",
-                background: "#333",
+                borderRadius: "12px",
+                background: "#0F172A",
                 color: "#fff",
+                fontSize: "14px",
               },
             }}
           />

@@ -6,6 +6,7 @@ export interface Partner {
   name: string;
   country: string;
   level: string;
+  username: string;
 }
 
 interface MatchStateStore {

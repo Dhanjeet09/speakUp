@@ -148,12 +148,6 @@ export function endCall(): void {
   }
 }
 
-let audioAnalyzer: {
-  context: AudioContext;
-  analyser: AnalyserNode;
-  dataArray: Uint8Array;
-} | null = null;
-
 export function startSpeakingDetection(
   stream: MediaStream,
   onSpeaking: (speaking: boolean) => void
@@ -165,15 +159,13 @@ export function startSpeakingDetection(
     const source = context.createMediaStreamSource(stream);
     source.connect(analyser);
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    audioAnalyzer = { context, analyser, dataArray } as typeof audioAnalyzer;
     let lastSpeaking = false;
 
     const interval = setInterval(() => {
-      if (!audioAnalyzer) return;
-      audioAnalyzer.analyser.getByteFrequencyData(audioAnalyzer.dataArray as unknown as Uint8Array<ArrayBuffer>);
+      analyser.getByteFrequencyData(dataArray);
       const avg =
-        audioAnalyzer.dataArray.reduce((a, b) => a + b, 0) /
-        audioAnalyzer.dataArray.length;
+        dataArray.reduce((a, b) => a + b, 0) /
+        dataArray.length;
       const speaking = avg > 10;
       if (speaking !== lastSpeaking) {
         lastSpeaking = speaking;
@@ -183,10 +175,7 @@ export function startSpeakingDetection(
 
     return () => {
       clearInterval(interval);
-      if (audioAnalyzer) {
-        audioAnalyzer.context.close();
-        audioAnalyzer = null;
-      }
+      context.close();
     };
   } catch {
     return () => {};

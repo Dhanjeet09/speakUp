@@ -7,34 +7,38 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import * as Sentry from "@sentry/node";
+import sanitizeHtml from "sanitize-html";
 
 import { ExpressPeerServer } from "peer";
 
 import { env } from "./lib/env";
-import { initSocket, getOnlineUsers, checkRateLimit } from "./lib/socket";
-import { disconnectPrisma, initDb } from "./lib/db";
+import { initSocket, getOnlineUsers, checkRateLimit, isUserInCall, setUserInCall, checkJoinQueueRate, addUserConnection, removeUserConnection } from "./lib/socket";
+import { disconnectPrisma, initDb, prisma } from "./lib/db";
 import { errorHandler } from "./middleware/errorHandler";
 import { requestLogger } from "./middleware/requestLogger";
-import { logInfo, logError, logDebug } from "./lib/logger";
+import { logInfo, logWarn, logError, logDebug } from "./lib/logger";
 
 import authRoutes from "./routes/auth";
 import sessionsRoutes from "./routes/sessions";
 import usersRoutes from "./routes/users";
 import reportsRoutes from "./routes/reports";
+import messagesRoutes from "./routes/messages";
+import friendsRoutes from "./routes/friends";
 import {
   addToQueue,
   removeFromQueue,
   getQueueSize,
   initMatchmaking,
+  getPendingMatch,
+  removePendingMatch,
 } from "./services/matchmaking";
 
-Sentry.init({ dsn: env.SENTRY_DSN, enabled: env.NODE_ENV === "production" });
+Sentry.init({ dsn: env.SENTRY_DSN } as any);
 
 const app = express();
 const httpServer = createServer(app);
 
 const CORS_ORIGIN = env.CORS_ORIGIN.split(",").map((s) => s.trim());
-const CORS_ORIGIN_STR = CORS_ORIGIN[0];
 
 initDb().catch(() => {});
 
@@ -53,7 +57,10 @@ app.use(
     },
   })
 );
-app.use(compression());
+app.use(compression({ filter: (req, res) => {
+  if (req.headers.upgrade) return false;
+  return compression.filter(req, res);
+} }));
 app.use(
   cors({
     origin: CORS_ORIGIN,
@@ -89,6 +96,8 @@ app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/sessions", sessionsRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/reports", reportsRoutes);
+app.use("/api/messages", messagesRoutes);
+app.use("/api/friends", friendsRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -113,9 +122,18 @@ io.on("connection", (socket) => {
 
   if (userId) {
     socket.join(userId);
-    logInfo("Socket", "User connected", { userId, socketId: socket.id });
+    addUserConnection(userId);
+    logInfo("Socket", "User connected and joined room", {
+      userId,
+      socketId: socket.id,
+      room: userId,
+    });
+    socket.broadcast.emit("user:online", { userId });
   } else {
-    logDebug("Socket", "Anonymous connection", { socketId: socket.id });
+    logDebug("Socket", "Anonymous connection (no userId in auth)", {
+      socketId: socket.id,
+      auth: JSON.stringify(socket.handshake.auth),
+    });
   }
 
   const count = getOnlineUsers(io).size;
@@ -137,13 +155,22 @@ io.on("connection", (socket) => {
 
   socket.on("joinQueue", wrapRateLimited(async (data) => {
     if (!userId) return;
+    if (isUserInCall(userId)) {
+      logWarn("Queue", "User already in a call, cannot join queue", { userId });
+      socket.emit("error", { message: "You are already in a call" });
+      return;
+    }
+    if (!checkJoinQueueRate(userId)) {
+      logWarn("Queue", "Join queue rate limited", { userId });
+      socket.emit("error", { message: "Please wait before searching again" });
+      return;
+    }
     logInfo("Queue", `User joining queue`, { userId, level: data.level, interests: data.interests });
     try {
       await addToQueue({
         userId,
         level: data.level,
         interests: data.interests || [],
-        blockedUserIds: data.blockedUserIds || [],
         joinedAt: Date.now(),
       });
 
@@ -174,19 +201,195 @@ io.on("connection", (socket) => {
   socket.on("callEnded", wrapRateLimited(({ roomId, partnerUserId }) => {
     if (!userId) return;
     logInfo("Call", `Call ended`, { userId, roomId, partnerUserId });
+    setUserInCall(userId, false);
     if (partnerUserId) {
+      setUserInCall(partnerUserId, false);
       socket.to(partnerUserId).emit("partnerLeft");
     } else if (roomId) {
       socket.to(roomId).emit("partnerLeft");
     }
   }));
 
-  socket.on("disconnect", async () => {
+  socket.on("message:send", wrapRateLimited(async (data) => {
+    if (!userId) return;
+    if (!data.receiverId || !data.content || typeof data.content !== "string") return;
+
+    const userRecord = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isSuspended: true },
+    });
+    if (userRecord?.isSuspended) {
+      socket.emit("error", { message: "Account suspended" });
+      return;
+    }
+
+    const [blockedBySender, blockedByReceiver] = await Promise.all([
+      prisma.block.findUnique({
+        where: { blockerId_blockedId: { blockerId: userId, blockedId: data.receiverId } },
+      }),
+      prisma.block.findUnique({
+        where: { blockerId_blockedId: { blockerId: data.receiverId, blockedId: userId } },
+      }),
+    ]);
+
+    if (blockedBySender || blockedByReceiver) {
+      socket.emit("error", { message: "Cannot send message to this user" });
+      return;
+    }
+
+    const sanitized = sanitizeHtml(data.content, { allowedTags: [], allowedAttributes: {} }).slice(0, 1000);
+
+    logInfo("Socket", "message:send received", {
+      socketId: socket.id,
+      senderId: userId,
+      receiverId: data.receiverId,
+      contentPreview: sanitized.slice(0, 50),
+    });
+
+    try {
+      const message = await prisma.chatMessage.create({
+        data: {
+          senderId: userId,
+          receiverId: data.receiverId,
+          content: sanitized,
+        },
+      });
+
+      logInfo("Socket", "Message saved from socket", {
+        messageId: message.id,
+        senderId: userId,
+        receiverId: data.receiverId,
+      });
+
+      const payload = {
+        message: {
+          id: message.id,
+          senderId: message.senderId,
+          receiverId: message.receiverId,
+          content: message.content,
+          createdAt: message.createdAt.toISOString(),
+        },
+      };
+
+      const receiverSockets = await io.in(data.receiverId).fetchSockets();
+      logInfo("Socket", "Emitting message:received", {
+        event: "message:received",
+        toReceiver: data.receiverId,
+        toSender: userId,
+        socketId: socket.id,
+        messageId: message.id,
+        receiverSocketsInRoom: receiverSockets.length,
+      });
+
+      socket.to(data.receiverId).emit("message:received", payload);
+      socket.emit("message:received", payload);
+    } catch (err) {
+      logError("Socket", "Failed to send message", { userId, error: String(err) });
+      socket.emit("error", { message: "Failed to send message" });
+    }
+  }));
+
+  socket.on("typing:start", wrapRateLimited(({ receiverId }) => {
+    if (!userId || !receiverId) return;
+    socket.to(receiverId).emit("typing:start", { senderId: userId });
+  }));
+
+  socket.on("typing:stop", wrapRateLimited(({ receiverId }) => {
+    if (!userId || !receiverId) return;
+    socket.to(receiverId).emit("typing:stop", { senderId: userId });
+  }));
+
+  socket.on("match:accept", wrapRateLimited(async ({ userId: partnerUserId }) => {
+    if (!userId || !partnerUserId) return;
+    const match = getPendingMatch(userId);
+    if (!match || match.partnerUserId !== partnerUserId) {
+      logWarn("Match", "Invalid match:accept - no pending match", { userId, partnerUserId });
+      socket.emit("error", { message: "No pending match found" });
+      return;
+    }
+    logInfo("Match", "Match accepted", { userId, partnerUserId });
+    removePendingMatch(userId);
+    removePendingMatch(partnerUserId);
+    io.to(partnerUserId).emit("match:accepted", { userId });
+  }));
+
+  socket.on("match:reject", wrapRateLimited(async ({ userId: partnerUserId }) => {
+    if (!userId || !partnerUserId) return;
+    const match = getPendingMatch(userId);
+    if (!match || match.partnerUserId !== partnerUserId) {
+      logWarn("Match", "Invalid match:reject - no pending match", { userId, partnerUserId });
+      return;
+    }
+    logInfo("Match", "Match rejected", { userId, partnerUserId });
+    setUserInCall(userId, false);
+    setUserInCall(partnerUserId, false);
+    removePendingMatch(userId);
+    removePendingMatch(partnerUserId);
+    io.to(partnerUserId).emit("match:rejected", { userId });
+  }));
+
+  socket.on("friend:call", wrapRateLimited(async ({ friendId, roomId, callerName }) => {
+    if (!userId || !friendId || !roomId || !callerName) return;
+
+    const callerRecord = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isSuspended: true },
+    });
+    if (callerRecord?.isSuspended) {
+      socket.emit("error", { message: "Account suspended" });
+      return;
+    }
+
+    const friendRecord = await prisma.user.findUnique({
+      where: { id: friendId },
+      select: { isSuspended: true },
+    });
+    if (friendRecord?.isSuspended) {
+      socket.emit("error", { message: "Cannot call a suspended user" });
+      return;
+    }
+
+    const friendship = await prisma.friendship.findFirst({
+      where: {
+        status: "accepted",
+        OR: [
+          { requesterId: userId, addresseeId: friendId },
+          { requesterId: friendId, addresseeId: userId },
+        ],
+      },
+    });
+    if (!friendship) {
+      logWarn("Friend", "Call blocked - not friends", { callerId: userId, friendId });
+      socket.emit("error", { message: "You can only call friends" });
+      return;
+    }
+
+    logInfo("Friend", "Friend call initiated", { callerId: userId, friendId, roomId });
+    socket.to(friendId).emit("friend:calling", { callerId: userId, callerName, roomId });
+  }));
+
+  socket.on("friend:call-answer", wrapRateLimited(({ callerId, accepted }) => {
+    if (!userId || !callerId) return;
+    logInfo("Friend", "Friend call answer", { answererId: userId, callerId, accepted });
+    socket.to(callerId).emit("friend:call-answer", { callerId: userId, accepted });
+  }));
+
+  socket.on("disconnect", async (reason) => {
     if (userId) {
-      logInfo("Socket", "User disconnected", { userId, socketId: socket.id });
-      await removeFromQueue(userId);
+      const remaining = removeUserConnection(userId);
+      logInfo("Socket", "User disconnected", {
+        userId,
+        socketId: socket.id,
+        reason,
+        remainingConnections: remaining,
+      });
+      if (remaining === 0) {
+        setUserInCall(userId, false);
+        await removeFromQueue(userId);
+        socket.broadcast.emit("user:offline", { userId });
+      }
     } else {
-      logDebug("Socket", "Anonymous disconnected", { socketId: socket.id });
+      logDebug("Socket", "Anonymous disconnected", { socketId: socket.id, reason });
     }
     if (queueInterval) {
       clearInterval(queueInterval);

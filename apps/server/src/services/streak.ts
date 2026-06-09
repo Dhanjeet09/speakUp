@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/db";
 
 function getUTCDate(date: Date = new Date()): string {
@@ -39,8 +40,9 @@ export function calculateStreak(sessionDates: Date[]): number {
   return streak;
 }
 
-export async function updateStreak(userId: string): Promise<void> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+export async function updateStreak(userId: string, tx?: Prisma.TransactionClient): Promise<void> {
+  const db = tx || prisma;
+  const user = await db.user.findUnique({ where: { id: userId } });
   if (!user) return;
 
   const todayUTC = getUTCDate();
@@ -60,7 +62,7 @@ export async function updateStreak(userId: string): Promise<void> {
     }
   }
 
-  await prisma.user.update({
+  await db.user.update({
     where: { id: userId },
     data: {
       currentStreak: newStreak,

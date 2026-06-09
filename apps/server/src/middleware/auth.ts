@@ -1,5 +1,6 @@
 import { Response, NextFunction } from "express";
-import { createSupabaseClient } from "../lib/supabase";
+import { createAnonSupabaseClient } from "../lib/supabase";
+import { prisma } from "../lib/db";
 import { logDebug, logWarn, logError as logErr } from "../lib/logger";
 import type { AuthenticatedRequest } from "../types";
 
@@ -41,7 +42,7 @@ export async function requireAuth(
       return;
     }
 
-    const supabase = createSupabaseClient();
+    const supabase = createAnonSupabaseClient();
     const { data, error } = await supabase.auth.getUser(token);
 
     if (error || !data.user) {
@@ -52,6 +53,18 @@ export async function requireAuth(
 
     req.userId = data.user.id;
     req.userEmail = data.user.email;
+
+    const userRecord = await prisma.user.findUnique({
+      where: { id: data.user.id },
+      select: { isSuspended: true, role: true },
+    });
+
+    if (userRecord?.isSuspended) {
+      res.status(403).json({ success: false, error: "Account suspended. Please contact support." });
+      return;
+    }
+
+    req.userRole = userRecord?.role || "learner";
     logDebug("Auth", "User authenticated", { userId: data.user.id });
     next();
   } catch (err) {
@@ -72,4 +85,50 @@ export function requireSameUser(
     return;
   }
   next();
+}
+
+export async function requireAdmin(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+
+    if (req.userRole !== "admin") {
+      res.status(403).json({ success: false, error: "Admin access required" });
+      return;
+    }
+
+    next();
+  } catch (err) {
+    logErr("Auth", "Admin verification exception", { error: String(err) });
+    res.status(500).json({ success: false, error: "Failed to verify admin status" });
+  }
+}
+
+export async function requireModerator(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+
+    if (req.userRole !== "admin" && req.userRole !== "moderator") {
+      res.status(403).json({ success: false, error: "Moderator access required" });
+      return;
+    }
+
+    next();
+  } catch (err) {
+    logErr("Auth", "Moderator verification exception", { error: String(err) });
+    res.status(500).json({ success: false, error: "Failed to verify moderator status" });
+  }
 }

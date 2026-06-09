@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+import { getSupabase } from "../supabase";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 export class ApiError extends Error {
   constructor(
@@ -18,11 +20,7 @@ interface ApiResponse<T> {
 
 async function getAccessToken(): Promise<string | null> {
   try {
-    const { createBrowserClient } = await import("@supabase/ssr");
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseAnonKey) return null;
-    const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
+    const supabase = getSupabase();
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token ?? null;
   } catch {

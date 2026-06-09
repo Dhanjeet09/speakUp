@@ -1,6 +1,6 @@
 import { Router, Response } from "express";
 import { prisma } from "../lib/db";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireModerator } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
 import { createReportSchema } from "../schemas";
 import { AppError, asyncHandler } from "../middleware/errorHandler";
@@ -72,16 +72,47 @@ router.post(
 );
 
 router.get(
+  "/",
+  requireAuth,
+  requireModerator,
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const skip = (page - 1) * limit;
+
+    const [reports, total] = await Promise.all([
+      prisma.report.findMany({
+        include: {
+          reporter: { select: { id: true, name: true } },
+          reported: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+      }),
+      prisma.report.count(),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        reports,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    });
+  })
+);
+
+router.get(
   "/open",
   requireAuth,
+  requireModerator,
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const isAdmin =
-      process.env.ADMIN_USER_IDS?.split(",").includes(req.userId || "");
-
-    if (!isAdmin) {
-      throw new AppError("Admin access required", 403);
-    }
-
     const reports = await prisma.report.findMany({
       where: { resolved: false },
       include: {
@@ -99,14 +130,8 @@ router.get(
 router.put(
   "/:id/resolve",
   requireAuth,
+  requireModerator,
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const isAdmin =
-      process.env.ADMIN_USER_IDS?.split(",").includes(req.userId || "");
-
-    if (!isAdmin) {
-      throw new AppError("Admin access required", 403);
-    }
-
     const report = await prisma.report.update({
       where: { id: req.params.id },
       data: { resolved: true },

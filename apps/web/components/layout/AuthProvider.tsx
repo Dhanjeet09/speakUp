@@ -48,6 +48,16 @@ export default function AuthProvider({
     };
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        await getSupabase().auth.refreshSession();
+      } catch {
+      }
+    }, 30 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   async function fetchProfile() {
     if (fetchingRef.current) return;
     fetchingRef.current = true;
@@ -58,13 +68,18 @@ export default function AuthProvider({
           id: string;
           email: string;
           name: string | null;
+          username: string | null;
           country: string | null;
+          timezone: string | null;
+          nativeLanguage: string | null;
+          bio: string | null;
           avatarUrl: string | null;
           englishLevel: string | null;
           interests: string[];
           totalMinutes: number;
           totalSessions: number;
           currentStreak: number;
+          role: string;
           createdAt: string;
         };
       }>("/api/auth/me");

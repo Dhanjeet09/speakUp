@@ -5,14 +5,21 @@ interface UserProfile {
   id: string;
   email: string;
   name: string | null;
+  username: string | null;
   country: string | null;
+  timezone: string | null;
+  nativeLanguage: string | null;
+  bio: string | null;
   avatarUrl: string | null;
   englishLevel: string | null;
   interests: string[];
   totalMinutes: number;
   totalSessions: number;
   currentStreak: number;
+  role: string;
   createdAt: string;
+  isSuspended?: boolean;
+  suspensionReason?: string | null;
 }
 
 interface AuthState {

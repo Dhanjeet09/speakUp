@@ -19,8 +19,8 @@ import { startMicLevelDetection } from "@/lib/webrtc";
 
 const VideoCall = dynamic(() => import("@/components/call/VideoCall"), {
   ssr: false,
-  loading: () => (
-    <div className="flex aspect-video w-full items-center justify-center rounded-card bg-gray-100 text-gray-400">
+      loading: () => (
+    <div className="flex aspect-video w-full items-center justify-center rounded-card bg-surface text-text-muted">
       Loading video call...
     </div>
   ),
@@ -57,6 +57,7 @@ export default function MatchPage() {
 
   const handleEndCallRef = useRef<() => void>(() => {});
   const sessionCreatedRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
   const confettiFiredRef = useRef(false);
 
   useEffect(() => {
@@ -192,7 +193,7 @@ export default function MatchPage() {
     };
 
     const onMatchFound = (data: {
-      partner: { name: string; country: string; level: string };
+      partner: { name: string; country: string; level: string; username: string };
       roomId: string;
       isCaller: boolean;
       partnerUserId: string;
@@ -213,14 +214,37 @@ export default function MatchPage() {
       handleEndCallRef.current();
     };
 
+    const onMatchAccepted = (data: { userId: string }) => {
+      toast.success("Match request accepted!");
+    };
+
+    const onMatchRejected = (data: { userId: string }) => {
+      toast("Match request declined", { icon: "💬" });
+      setState("IDLE");
+    };
+
+    const onUserOnline = (data: { userId: string }) => {
+    };
+
+    const onUserOffline = (data: { userId: string }) => {
+    };
+
     socket.on("queuePosition", onQueuePosition);
     socket.on("matchFound", onMatchFound);
     socket.on("partnerLeft", onPartnerLeft);
+    socket.on("match:accepted", onMatchAccepted);
+    socket.on("match:rejected", onMatchRejected);
+    socket.on("user:online", onUserOnline);
+    socket.on("user:offline", onUserOffline);
 
     return () => {
       socket.off("queuePosition", onQueuePosition);
       socket.off("matchFound", onMatchFound);
       socket.off("partnerLeft", onPartnerLeft);
+      socket.off("match:accepted", onMatchAccepted);
+      socket.off("match:rejected", onMatchRejected);
+      socket.off("user:online", onUserOnline);
+      socket.off("user:offline", onUserOffline);
     };
   }, [state, setPartner, setRoomId, setIsCaller, setWaitingCount, setState]);
 
@@ -232,6 +256,17 @@ export default function MatchPage() {
     return () => clearInterval(interval);
   }, [state]);
 
+  useEffect(() => {
+    if (state !== "IN_CALL") return;
+
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      handleEndCallRef.current();
+      e.preventDefault();
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [state]);
+
   function handleJoinQueue() {
     if (!user || !profile) return;
     setState("PERMISSION_CHECK");
@@ -239,12 +274,13 @@ export default function MatchPage() {
 
   function proceedToSearch() {
     if (!user || !profile) return;
-    const socket = connectSocket(user.id);
-    socket.emit("joinQueue", {
-      userId: user.id,
-      level: profile.englishLevel,
-      interests: profile.interests,
-    });
+    connectSocket(user.id).then((socket) => {
+      socket.emit("joinQueue", {
+        userId: user.id,
+        level: profile.englishLevel ?? "",
+        interests: profile.interests,
+      });
+    }).catch(console.error);
     setState("SEARCHING");
     setSearchTimer(0);
     toast.success("Searching for a partner...");
@@ -260,20 +296,28 @@ export default function MatchPage() {
 
   const handleEndCall = useCallback(async () => {
     const socket = getSocket();
-    socket.emit("callEnded", { roomId, partnerUserId });
+    socket.emit("callEnded", { roomId: roomId ?? undefined, partnerUserId: partnerUserId ?? undefined });
 
     if (user && partnerUserId && isCaller && !sessionCreatedRef.current) {
       sessionCreatedRef.current = true;
       const callDuration = useCallStore.getState().durationSeconds;
-      try {
-        await createSession({
-          user1Id: user.id,
-          user2Id: partnerUserId,
-          durationSeconds: callDuration,
-          topicUsed: topic,
-        });
-      } catch {
-        toast.error("Failed to save session");
+      if (callDuration < 5) {
+        sessionCreatedRef.current = false;
+      } else {
+        try {
+          const result = await createSession({
+            user1Id: user.id,
+            user2Id: partnerUserId,
+            durationSeconds: callDuration,
+            topicUsed: topic,
+            roomUrl: roomId || undefined,
+          });
+          if (result?.session?.id) {
+            sessionIdRef.current = result.session.id;
+          }
+        } catch {
+          toast.error("Failed to save session");
+        }
       }
     }
 
@@ -283,7 +327,8 @@ export default function MatchPage() {
   handleEndCallRef.current = handleEndCall;
 
   async function handleRating(positive: boolean) {
-    if (!user || !partnerUserId || !roomId) {
+    const id = sessionIdRef.current || roomId;
+    if (!user || !partnerUserId || !id) {
       toast.success("Thanks for your feedback!");
       setTimeout(() => reset(), 1500);
       return;
@@ -291,7 +336,7 @@ export default function MatchPage() {
 
     try {
       const { patch } = await import("@/lib/api/client");
-      await patch(`/api/sessions/${roomId}/rate`, { positive });
+      await patch(`/api/sessions/${id}/rate`, { positive });
     } catch {
     }
 
@@ -317,15 +362,15 @@ export default function MatchPage() {
             <Card className="w-full max-w-md">
               <CardContent className="pt-6 text-center">
                 <h2 className="font-semibold">Today&apos;s Topic</h2>
-                <p className="mt-2 text-gray-600">{topic}</p>
+                <p className="mt-2 text-text-secondary">{topic}</p>
               </CardContent>
             </Card>
             {micLevel >= 0 && (
               <div className="w-full max-w-md">
-                <p className="mb-1 text-xs text-gray-500">Mic level</p>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                <p className="mb-1 text-xs text-text-secondary">Mic level</p>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-border">
                   <div
-                    className="h-full rounded-full bg-teal-500 transition-all duration-100"
+                    className="h-full rounded-full bg-primary transition-all duration-100"
                     style={{ width: `${micLevel}%` }}
                   />
                 </div>
@@ -341,10 +386,10 @@ export default function MatchPage() {
           <div className="flex flex-col items-center gap-6">
             <div className="h-16 w-16 animate-spin rounded-full border-4 border-primary border-t-transparent" />
             <h2 className="text-xl font-semibold">Checking permissions...</h2>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-text-secondary">
               Please allow camera and microphone access when prompted by your browser.
             </p>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-text-muted">
               {typeof navigator !== "undefined" &&
               /Chrome/i.test(navigator.userAgent)
                 ? 'Click "Allow" in the pop-up near the address bar.'
@@ -368,7 +413,7 @@ export default function MatchPage() {
               <>
                 <div className="h-16 w-16 animate-spin rounded-full border-4 border-primary border-t-transparent" />
                 <h2 className="text-xl font-semibold">Finding your match...</h2>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-text-secondary">
                   {searchTimer < 30
                     ? "Looking for someone with similar interests..."
                     : searchTimer < 45
@@ -376,7 +421,7 @@ export default function MatchPage() {
                     : "Searching adjacent levels..."}
                 </p>
                 <p className="text-lg font-bold text-primary">{searchTimer}s</p>
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-text-muted">
                   {waitingCount} other{waitingCount !== 1 ? "s" : ""} in queue
                 </p>
                 <Button variant="outline" onClick={handleLeaveQueue}>
@@ -385,14 +430,14 @@ export default function MatchPage() {
               </>
             ) : (
               <>
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 text-2xl">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface text-2xl">
                   ⏰
                 </div>
                 <h2 className="text-xl font-semibold">No partners available right now</h2>
-                <p className="max-w-sm text-center text-sm text-gray-500">
+                <p className="max-w-sm text-center text-sm text-text-secondary">
                   No one is searching at your level right now. Try expanding your interests or check back later.
                 </p>
-                <p className="text-lg font-bold text-gray-400">{searchTimer}s</p>
+                <p className="text-lg font-bold text-text-muted">{searchTimer}s</p>
                 <div className="flex gap-3">
                   <Button variant="outline" onClick={handleLeaveQueue}>
                     Cancel
@@ -416,11 +461,14 @@ export default function MatchPage() {
             </div>
             <h2 className="text-xl font-bold">Match found!</h2>
             <p className="text-lg">{partner.name}</p>
+            {partner.username && (
+              <p className="text-sm text-text-secondary">@{partner.username}</p>
+            )}
             <div className="flex gap-2">
               <Badge>{partner.level}</Badge>
               <Badge variant="outline">{partner.country}</Badge>
             </div>
-            <p className="text-sm text-gray-500">Starting call...</p>
+            <p className="text-sm text-text-secondary">Starting call...</p>
           </div>
         )}
 
@@ -434,7 +482,7 @@ export default function MatchPage() {
                 )}
                 <Badge variant="outline">{partner.level}</Badge>
               </div>
-              <div className="text-sm text-gray-500">{topic}</div>
+              <div className="text-sm text-text-secondary">{topic}</div>
             </div>
 
             <VideoCall
@@ -450,7 +498,7 @@ export default function MatchPage() {
         {state === "ENDED" && (
           <div ref={ratingRef} className="flex flex-col items-center gap-6" aria-live="polite">
             <h2 className="text-xl font-bold">Session ended</h2>
-            <p className="text-gray-500">How was your session?</p>
+            <p className="text-text-secondary">How was your session?</p>
             <div className="flex gap-4">
               <Button
                 variant="success"

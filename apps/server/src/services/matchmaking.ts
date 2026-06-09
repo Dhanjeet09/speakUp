@@ -1,5 +1,7 @@
-import { getIO } from "../lib/socket";
+import { getIO, setUserInCall } from "../lib/socket";
+import { prisma } from "../lib/db";
 import { logDebug, logInfo, logWarn, logError } from "../lib/logger";
+import { getTodaysTopic as getSharedTopic, DAILY_TOPICS } from "@speakup/config";
 import type { QueueUser } from "../types";
 
 const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
@@ -70,6 +72,114 @@ function removeStaleEntries(): void {
   }
 }
 
+async function fetchBlockedIds(userId: string): Promise<string[]> {
+  try {
+    const blocks = await prisma.block.findMany({
+      where: { blockerId: userId },
+      select: { blockedId: true },
+    });
+    return blocks.map((b) => b.blockedId);
+  } catch {
+    return [];
+  }
+}
+
+async function areUsersBlocked(userAId: string, userBId: string): Promise<boolean> {
+  const [aBlocks, bBlocks] = await Promise.all([
+    fetchBlockedIds(userAId),
+    fetchBlockedIds(userBId),
+  ]);
+  return aBlocks.includes(userBId) || bBlocks.includes(userAId);
+}
+
+function getSharedInterests(userA: QueueUser, userB: QueueUser): string[] {
+  const interestsB = new Set(userB.interests);
+  return userA.interests.filter((i) => interestsB.has(i));
+}
+
+function getAdjacentLevels(level: string): string[] {
+  const idx = LEVELS.indexOf(level as typeof LEVELS[number]);
+  if (idx === -1) return [];
+  const adj: string[] = [];
+  if (idx > 0) adj.push(LEVELS[idx - 1]);
+  if (idx < LEVELS.length - 1) adj.push(LEVELS[idx + 1]);
+  return adj;
+}
+
+let matchCounter = 0;
+
+async function getUserProfile(userId: string): Promise<{ name: string; country: string; username: string }> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true, country: true, username: true },
+    });
+    return {
+      name: user?.name || userId,
+      country: user?.country || "",
+      username: user?.username || "",
+    };
+  } catch {
+    return { name: userId, country: "", username: "" };
+  }
+}
+
+async function createMatch(userA: QueueUser, userB: QueueUser): Promise<void> {
+  if (!userMap.has(userA.userId) || !userMap.has(userB.userId)) {
+    logWarn("Matchmaking", "Match aborted: one or both users already removed", {
+      userA: userA.userId,
+      userB: userB.userId,
+    });
+    return;
+  }
+
+  const roomId = `room_${++matchCounter}_${Date.now()}`;
+  const topic = getSharedTopic(DAILY_TOPICS);
+
+  await removeFromQueue(userA.userId);
+  await removeFromQueue(userB.userId);
+
+  setUserInCall(userA.userId, true);
+  setUserInCall(userB.userId, true);
+
+  const [profileA, profileB] = await Promise.all([
+    getUserProfile(userA.userId),
+    getUserProfile(userB.userId),
+  ]);
+
+  const io = getIO();
+
+  const userACaller = userA.userId < userB.userId;
+
+  logInfo("Matchmaking", "Match created", {
+    userA: userA.userId,
+    userB: userB.userId,
+    levelA: userA.level,
+    levelB: userB.level,
+    roomId,
+    userACaller,
+  });
+
+  pendingMatches.set(userA.userId, { partnerUserId: userB.userId, roomId, timestamp: Date.now() });
+  pendingMatches.set(userB.userId, { partnerUserId: userA.userId, roomId, timestamp: Date.now() });
+
+  io.to(userA.userId).emit("matchFound", {
+    partnerUserId: userB.userId,
+    partner: { name: profileB.name, country: profileB.country, level: userB.level, username: profileB.username },
+    roomId,
+    isCaller: userACaller,
+    topic,
+  });
+
+  io.to(userB.userId).emit("matchFound", {
+    partnerUserId: userA.userId,
+    partner: { name: profileA.name, country: profileA.country, level: userA.level, username: profileA.username },
+    roomId,
+    isCaller: !userACaller,
+    topic,
+  });
+}
+
 async function tryMatchOnce(): Promise<boolean> {
   for (const level of LEVELS) {
     const queue = getQueue(level);
@@ -80,10 +190,9 @@ async function tryMatchOnce(): Promise<boolean> {
         const userA = queue[i];
         const userB = queue[j];
 
-        if (areUsersBlocked(userA, userB)) continue;
+        if (await areUsersBlocked(userA.userId, userB.userId)) continue;
 
         const waitTimeA = Date.now() - userA.joinedAt;
-        const waitTimeB = Date.now() - userB.joinedAt;
         const sharedInterests = getSharedInterests(userA, userB);
 
         if (sharedInterests.length > 0 || waitTimeA > INTEREST_MATCH_TIMEOUT_MS) {
@@ -104,13 +213,11 @@ async function tryAdjacentLevelMatch(): Promise<boolean> {
       const waitTime = Date.now() - userA.joinedAt;
       if (waitTime < LEVEL_EXPAND_TIMEOUT_MS) continue;
 
-      const blockedSet = new Set(userA.blockedUserIds);
-
       for (const adjLevel of getAdjacentLevels(level)) {
         const adjQueue = getQueue(adjLevel);
         for (const userB of adjQueue) {
           if (userA.userId === userB.userId) continue;
-          if (blockedSet.has(userB.userId)) continue;
+          if (await areUsersBlocked(userA.userId, userB.userId)) continue;
 
           await createMatch(userA, userB);
           return true;
@@ -121,86 +228,21 @@ async function tryAdjacentLevelMatch(): Promise<boolean> {
   return false;
 }
 
-function areUsersBlocked(userA: QueueUser, userB: QueueUser): boolean {
-  const blockedA = new Set(userA.blockedUserIds);
-  const blockedB = new Set(userB.blockedUserIds);
-  return blockedA.has(userB.userId) || blockedB.has(userA.userId);
-}
+const pendingMatches = new Map<string, { partnerUserId: string; roomId: string; timestamp: number }>();
+const PENDING_MATCH_TTL = 60000;
 
-function getSharedInterests(userA: QueueUser, userB: QueueUser): string[] {
-  const interestsB = new Set(userB.interests);
-  return userA.interests.filter((i) => interestsB.has(i));
-}
-
-function getAdjacentLevels(level: string): string[] {
-  const idx = LEVELS.indexOf(level as typeof LEVELS[number]);
-  if (idx === -1) return [];
-  const adj: string[] = [];
-  if (idx > 0) adj.push(LEVELS[idx - 1]);
-  if (idx < LEVELS.length - 1) adj.push(LEVELS[idx + 1]);
-  return adj;
-}
-
-let matchCounter = 0;
-
-async function createMatch(userA: QueueUser, userB: QueueUser): Promise<void> {
-  if (!userMap.has(userA.userId) || !userMap.has(userB.userId)) {
-    logWarn("Matchmaking", "Match aborted: one or both users already removed", {
-      userA: userA.userId,
-      userB: userB.userId,
-    });
-    return;
+export function getPendingMatch(userId: string): { partnerUserId: string; roomId: string } | null {
+  const match = pendingMatches.get(userId);
+  if (!match) return null;
+  if (Date.now() - match.timestamp > PENDING_MATCH_TTL) {
+    pendingMatches.delete(userId);
+    return null;
   }
-
-  const roomId = `room_${++matchCounter}_${Date.now()}`;
-  const topic = getTodaysTopic();
-
-  await removeFromQueue(userA.userId);
-  await removeFromQueue(userB.userId);
-
-  const io = getIO();
-
-  const userACaller = userA.userId < userB.userId;
-
-  logInfo("Matchmaking", "Match created", {
-    userA: userA.userId,
-    userB: userB.userId,
-    levelA: userA.level,
-    levelB: userB.level,
-    roomId,
-    userACaller,
-  });
-
-  io.to(userA.userId).emit("matchFound", {
-    partnerUserId: userB.userId,
-    partner: { name: userB.userId, country: "", level: userB.level },
-    roomId,
-    isCaller: userACaller,
-    topic,
-  });
-
-  io.to(userB.userId).emit("matchFound", {
-    partnerUserId: userA.userId,
-    partner: { name: userA.userId, country: "", level: userA.level },
-    roomId,
-    isCaller: !userACaller,
-    topic,
-  });
+  return { partnerUserId: match.partnerUserId, roomId: match.roomId };
 }
 
-function getTodaysTopic(): string {
-  const topics = [
-    "Describe your hometown and what you love about it.",
-    "What superpower would you choose and why?",
-    "Talk about a meal you will never forget.",
-    "Describe your favorite movie and why it resonates with you.",
-    "If you could visit any country, where would you go?",
-  ];
-  const dayOfYear = Math.floor(
-    (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) /
-      86400000
-  );
-  return topics[dayOfYear % topics.length];
+export function removePendingMatch(userId: string): void {
+  pendingMatches.delete(userId);
 }
 
 export function resetQueues(): void {

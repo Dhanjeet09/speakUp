@@ -113,7 +113,7 @@ export default function VideoCall({
                       reject(new Error("Call connection timed out"));
                     }, 20000);
 
-                    p.on("error", (err) => {
+                    p.on("error", (err: any) => {
                       clearTimeout(callTimeout);
                       reject(mapPeerError(err));
                     });
@@ -142,7 +142,7 @@ export default function VideoCall({
             }
           });
 
-          p.on("error", (err) => {
+          p.on("error", (err: any) => {
             clearTimeout(peerOpenTimeout);
             rejectInit(mapPeerError(err));
           });
@@ -356,6 +356,7 @@ export default function VideoCall({
               playsInline
               muted
               className="h-full w-full object-cover"
+              style={{ transform: "scaleX(-1)" }}
               role="img"
               aria-label="Your camera feed"
               onLoadedData={() => setLocalLoaded(true)}

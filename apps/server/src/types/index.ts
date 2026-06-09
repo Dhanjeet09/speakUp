@@ -3,6 +3,7 @@ import type { Request } from "express";
 export interface AuthenticatedRequest extends Request {
   userId?: string;
   userEmail?: string;
+  userRole?: string;
 }
 
 export interface ApiResponse<T = unknown> {
@@ -41,7 +42,6 @@ export interface QueueUser {
   userId: string;
   level: string;
   interests: string[];
-  blockedUserIds: string[];
   joinedAt: number;
 }
 
