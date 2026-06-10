@@ -14,7 +14,6 @@ let currentUserId: string | null = null;
 
 export function getSocket(): TypedSocket {
   if (!socket) {
-    console.log("[Socket] Creating new socket instance", { url: SOCKET_URL });
     socket = io(SOCKET_URL, {
       transports: ["polling", "websocket"],
       autoConnect: false,
@@ -23,23 +22,6 @@ export function getSocket(): TypedSocket {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
     }) as TypedSocket;
-    socket.on("connect", () => {
-      console.log("[Socket] Socket connected", { socketId: socket?.id });
-    });
-    socket.on("disconnect", (reason) => {
-      console.log("[Socket] Socket disconnected", { socketId: socket?.id, reason });
-    });
-    socket.on("connect_error", (err) => {
-      console.error("[Socket] Socket connection error", {
-        message: err.message,
-      });
-    });
-    (socket as any).on("reconnect_attempt", (attempt: number) => {
-      console.log("[Socket] Reconnect attempt", { attempt, socketId: socket?.id });
-    });
-    (socket as any).on("reconnect", () => {
-      console.log("[Socket] Reconnected", { socketId: socket?.id });
-    });
   }
   return socket;
 }
@@ -48,7 +30,6 @@ export async function connectSocket(userId: string): Promise<TypedSocket> {
   const s = getSocket();
 
   if (currentUserId === userId && s.connected) {
-    console.log("[Socket] Already connected with userId", userId, "socketId:", s.id);
     return s;
   }
 
@@ -58,19 +39,10 @@ export async function connectSocket(userId: string): Promise<TypedSocket> {
     const { data } = await supabase.auth.getSession();
     token = data.session?.access_token ?? null;
   } catch {
-    console.warn("[Socket] Could not get auth token, connecting without it");
   }
 
-  console.log("[Socket] Connecting socket", {
-    previousUserId: currentUserId,
-    newUserId: userId,
-    wasConnected: socket?.connected,
-    socketId: socket?.id,
-    hasToken: !!token,
-  });
   currentUserId = userId;
   if (s.connected) {
-    console.log("[Socket] Disconnecting existing socket", { socketId: s.id });
     s.disconnect();
   }
   s.auth = { userId, token };

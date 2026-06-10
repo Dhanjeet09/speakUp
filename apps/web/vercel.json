@@ -1,0 +1,22 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm install",
+  "buildCommand": "npx turbo build --scope=@speakup/web --include-dependencies",
+  "outputDirectory": ".next",
+  "devCommand": "next dev --port 3000",
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  },
+  "env": {
+    "NEXT_PUBLIC_SUPABASE_URL": "@next-public-supabase-url",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@next-public-supabase-anon-key",
+    "NEXT_PUBLIC_SOCKET_URL": "@next-public-socket-url",
+    "NEXT_PUBLIC_SENTRY_DSN": "@next-public-sentry-dsn",
+    "SENTRY_DSN": "@sentry-dsn",
+    "SENTRY_ORG": "@sentry-org",
+    "SENTRY_PROJECT": "@sentry-project"
+  }
+}

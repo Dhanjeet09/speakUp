@@ -1,0 +1,63 @@
+# Render Blueprint — Infrastructure as Code
+# Docs: https://render.com/docs/blueprint-spec
+
+databases:
+  - name: speakup-db
+    plan: free
+    region: oregon
+    databaseName: speakup
+    ipAllowList: []
+
+services:
+  # ── Server (Express + Socket.IO) ──
+  - type: web
+    name: speakup-server
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: apps/server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: speakup-db
+          property: connectionString
+      - key: DIRECT_URL
+        fromDatabase:
+          name: speakup-db
+          property: connectionString
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        value: https://speakup-web.vercel.app
+      - key: SENTRY_DSN
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+    autoDeploy: true
+    pullRequestPreviewsEnabled: false  # PRs don't need a full server stack
+
+  # ── Database Backup Cron (optional) ──
+  - type: cron
+    name: speakup-db-backup
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: ""
+    startCommand: python -c "print('Backup placeholder — implement with pg_dump')"
+    schedule: "0 4 * * *"  # Daily at 4AM UTC
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: speakup-db
+          property: connectionString

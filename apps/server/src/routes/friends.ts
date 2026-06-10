@@ -3,6 +3,7 @@ import { prisma } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
 import { AppError, asyncHandler } from "../middleware/errorHandler";
 import { validateZod } from "../middleware/validateZod";
+import { validateParamId } from "../middleware/validateParams";
 import { sendFriendRequestSchema } from "../schemas";
 import { getIO } from "../lib/socket";
 import { logInfo } from "../lib/logger";
@@ -202,6 +203,7 @@ router.post(
 router.post(
   "/requests/:id/accept",
   requireAuth,
+  validateParamId("id"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.userId!;
     const { id } = req.params;
@@ -235,6 +237,7 @@ router.post(
 router.post(
   "/requests/:id/reject",
   requireAuth,
+  validateParamId("id"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.userId!;
     const { id } = req.params;
@@ -261,6 +264,7 @@ router.post(
 router.delete(
   "/:friendId",
   requireAuth,
+  validateParamId("friendId"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.userId!;
     const { friendId } = req.params;

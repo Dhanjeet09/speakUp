@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
-import { createSessionSchema } from "../schemas";
+import { validateParamId } from "../middleware/validateParams";
+import { createSessionSchema, rateSessionSchema } from "../schemas";
 import { AppError, asyncHandler } from "../middleware/errorHandler";
 import { updateStreak } from "../services/streak";
 import { logInfo, logError as logErr } from "../lib/logger";
@@ -68,8 +69,13 @@ router.post(
 router.get(
   "/:userId",
   requireAuth,
+  validateParamId("userId"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { userId } = req.params;
+
+    if (req.userId !== userId) {
+      throw new AppError("You can only view your own sessions", 403);
+    }
 
     const where = {
       OR: [{ user1Id: userId }, { user2Id: userId }],
@@ -96,6 +102,7 @@ router.get(
 router.get(
   "/:userId/ratings",
   requireAuth,
+  validateParamId("userId"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { userId } = req.params;
 
@@ -153,21 +160,18 @@ router.get(
 router.patch(
   "/:id/rate",
   requireAuth,
+  validateParamId("id"),
+  validateZod(rateSessionSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { id } = req.params;
     const { positive } = req.body;
-
-    if (typeof positive !== "boolean") {
-      throw new AppError("positive must be a boolean", 400);
-    }
 
     const session = await prisma.session.findUnique({
       where: { id },
     });
 
     if (!session) {
-      res.status(404).json({ success: false, error: "Session not found" });
-      return;
+      throw new AppError("Session not found", 404);
     }
 
     const isUser1 = session.user1Id === req.userId;

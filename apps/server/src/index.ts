@@ -33,7 +33,13 @@ import {
   removePendingMatch,
 } from "./services/matchmaking";
 
-Sentry.init({ dsn: env.SENTRY_DSN } as any);
+if (env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: env.SENTRY_DSN,
+    integrations: (integrations) =>
+      integrations.filter((i) => !i.name.toLowerCase().includes("mongo")),
+  });
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -44,7 +50,8 @@ initDb().catch(() => {});
 
 app.use(
   helmet({
-    crossOriginEmbedderPolicy: { policy: "require-corp" },
+    crossOriginEmbedderPolicy: false,
+    frameguard: { action: "deny" },
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
@@ -54,6 +61,11 @@ app.use(
         styleSrc: ["'self'", "'unsafe-inline'"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
       },
+    },
+    strictTransportSecurity: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
     },
   })
 );

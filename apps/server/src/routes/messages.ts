@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import { prisma } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
+import { validateParamId } from "../middleware/validateParams";
 import { sendMessageSchema } from "../schemas";
 import { AppError, asyncHandler } from "../middleware/errorHandler";
 import { logInfo } from "../lib/logger";
@@ -101,6 +102,7 @@ router.get(
 router.get(
   "/:userId",
   requireAuth,
+  validateParamId("userId"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.userId!;
     const otherUserId = req.params.userId;
@@ -158,6 +160,7 @@ router.get(
 router.patch(
   "/read/:userId",
   requireAuth,
+  validateParamId("userId"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const currentUserId = req.userId!;
     const senderId = req.params.userId;

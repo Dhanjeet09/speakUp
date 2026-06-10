@@ -14,14 +14,23 @@ import { getTodaysTopic } from "@/lib/topics";
 import { blockUser } from "@/lib/api/reports";
 import { getDiscoverableUsers } from "@/lib/api/users";
 import { sendFriendRequest } from "@/lib/api/friends";
+import type { SessionData } from "@/lib/api/sessions";
 import toast from "react-hot-toast";
+
+interface DiscoverableUser {
+  id: string;
+  name: string | null;
+  username: string | null;
+  country: string | null;
+  englishLevel: string | null;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
   const { user, profile, isLoading } = useAuthStore();
-  const [recentSessions, setRecentSessions] = useState<any[]>([]);
+  const [recentSessions, setRecentSessions] = useState<SessionData[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
-  const [discoverableUsers, setDiscoverableUsers] = useState<any[]>([]);
+  const [discoverableUsers, setDiscoverableUsers] = useState<DiscoverableUser[]>([]);
   const [loadingDiscoverable, setLoadingDiscoverable] = useState(true);
 
   useEffect(() => {
@@ -117,7 +126,7 @@ export default function DashboardPage() {
               <EmptyState icon="👥" title="No users yet" description="Invite friends to join SpeakUp!" />
             ) : (
               <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
-                {discoverableUsers.slice(0, 6).map((u: any) => (
+                {discoverableUsers.slice(0, 6).map((u) => (
                   <div key={u.id} className="group flex items-center justify-between rounded-xl border border-border bg-white p-3 transition-all hover:border-primary/30 hover:shadow-sm">
                     <Link href={`/profile/${u.id}`} className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/10 to-secondary/10 text-sm font-semibold text-primary">
@@ -156,7 +165,7 @@ export default function DashboardPage() {
             <EmptyState icon="🎙️" title="No sessions yet" description="Start your first practice session" action={<Link href="/match"><Button>Start Practicing</Button></Link>} />
           ) : (
             <div className="space-y-2">
-              {recentSessions.map((s: any) => {
+              {recentSessions.map((s: SessionData) => {
                 const isUser1 = s.user1Id === user?.id;
                 const partnerId = isUser1 ? s.user2Id : s.user1Id;
                 const partnerName = isUser1 ? s.user2?.name : s.user1?.name;

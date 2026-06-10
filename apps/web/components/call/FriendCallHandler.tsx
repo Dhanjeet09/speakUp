@@ -23,7 +23,7 @@ export default function FriendCallHandler() {
 
   useEffect(() => {
     if (!user) return;
-    connectSocket(user.id).catch(console.error);
+    connectSocket(user.id).catch(() => {});
     const socket = getSocket();
 
     const onCalling = (payload: { callerId: string; callerName: string; roomId: string }) => {

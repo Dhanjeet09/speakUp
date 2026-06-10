@@ -94,7 +94,8 @@ router.post(
     const supabase = createAnonSupabaseClient();
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) {
-      throw new AppError(error.message, 400);
+      logWarn("Auth", "Registration failed", { error: error.message });
+      throw new AppError("Registration failed. Please try again.", 400);
     }
     logInfo("Auth", "User registered", { userId: data.user?.id });
     res.status(201).json({ success: true, data: { user: data.user } });
@@ -118,11 +119,15 @@ router.post(
 router.post(
   "/logout",
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const supabase = createAnonSupabaseClient();
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       const token = authHeader.slice(7);
-      await supabase.auth.admin.signOut(token);
+      try {
+        const supabase = createSupabaseClient();
+        await supabase.auth.admin.signOut(token);
+      } catch {
+        logWarn("Auth", "Server-side token revocation failed (token may already be invalid)");
+      }
     }
     res.json({ success: true });
   })

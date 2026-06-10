@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import { prisma } from "../lib/db";
 import { requireAuth, requireModerator } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
+import { validateParamId } from "../middleware/validateParams";
 import { createReportSchema } from "../schemas";
 import { AppError, asyncHandler } from "../middleware/errorHandler";
 import { logInfo, logWarn } from "../lib/logger";
@@ -39,6 +40,7 @@ router.post(
 router.post(
   "/:userId/block",
   requireAuth,
+  validateParamId("userId"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const blockedId = req.params.userId;
 
@@ -131,7 +133,16 @@ router.put(
   "/:id/resolve",
   requireAuth,
   requireModerator,
+  validateParamId("id"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const existing = await prisma.report.findUnique({
+      where: { id: req.params.id },
+    });
+
+    if (!existing) {
+      throw new AppError("Report not found", 404);
+    }
+
     const report = await prisma.report.update({
       where: { id: req.params.id },
       data: { resolved: true },

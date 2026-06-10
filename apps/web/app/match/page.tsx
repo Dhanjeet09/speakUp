@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import toast from "react-hot-toast";
 import confetti from "canvas-confetti";
 import { startMicLevelDetection } from "@/lib/webrtc";
+import { FLAG_MAP } from "@speakup/config";
 
 const VideoCall = dynamic(() => import("@/components/call/VideoCall"), {
   ssr: false,
@@ -280,7 +281,7 @@ export default function MatchPage() {
         level: profile.englishLevel ?? "",
         interests: profile.interests,
       });
-    }).catch(console.error);
+    }).catch(() => {});
     setState("SEARCHING");
     setSearchTimer(0);
     toast.success("Searching for a partner...");
@@ -526,14 +527,5 @@ export default function MatchPage() {
 }
 
 function getFlagEmoji(country: string): string {
-  const flags: Record<string, string> = {
-    Brazil: "🇧🇷", China: "🇨🇳", Colombia: "🇨🇴", Egypt: "🇪🇬",
-    France: "🇫🇷", Germany: "🇩🇪", India: "🇮🇳", Indonesia: "🇮🇩",
-    Italy: "🇮🇹", Japan: "🇯🇵", Mexico: "🇲🇽", Morocco: "🇲🇦",
-    Philippines: "🇵🇭", Russia: "🇷🇺", "Saudi Arabia": "🇸🇦",
-    "South Korea": "🇰🇷", Spain: "🇪🇸", Thailand: "🇹🇭",
-    Turkey: "🇹🇷", Ukraine: "🇺🇦", "United Kingdom": "🇬🇧",
-    "United States": "🇺🇸", Vietnam: "🇻🇳",
-  };
-  return flags[country] || "🌍";
+  return (FLAG_MAP as Record<string, string>)[country] || "🌍";
 }

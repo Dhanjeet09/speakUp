@@ -1,5 +1,6 @@
 import { Server as HttpServer } from "http";
 import { Server } from "socket.io";
+import { env } from "./env";
 import { logInfo, logDebug, logWarn } from "./logger";
 import { createAnonSupabaseClient } from "./supabase";
 import { prisma } from "./db";
@@ -68,7 +69,7 @@ export function initSocket(httpServer: HttpServer): Server {
   logInfo("Socket", "Initializing Socket.IO");
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+      origin: env.CORS_ORIGIN,
       credentials: true,
     },
     pingInterval: 25000,

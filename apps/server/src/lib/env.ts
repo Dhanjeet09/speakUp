@@ -4,6 +4,7 @@ const schema = z.object({
   DATABASE_URL: z.string().url(),
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_KEY: z.string().min(1),
+  SUPABASE_ANON_KEY: z.string().min(1),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   PORT: z.coerce.number().default(4000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),

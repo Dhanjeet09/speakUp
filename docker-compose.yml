@@ -4,13 +4,16 @@ services:
       context: .
       dockerfile: apps/server/Dockerfile
     ports:
-      - "4000:4000"
+      - "${PORT:-4000}:${PORT:-4000}"
     env_file: ./apps/server/.env
     depends_on:
       db:
         condition: service_healthy
     environment:
       - DATABASE_URL=postgres://speakup:password@db:5432/speakup
+      - DIRECT_URL=postgres://speakup:password@db:5432/speakup
+      - NODE_ENV=development
+      - PORT=${PORT:-4000}
 
   db:
     image: postgres:16-alpine

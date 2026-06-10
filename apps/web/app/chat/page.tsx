@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { Suspense, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import {
@@ -20,6 +20,36 @@ import toast from "react-hot-toast";
 import { getFriends } from "@/lib/api/friends";
 
 export default function ChatPage() {
+  return (
+    <Suspense fallback={<ChatPageFallback />}>
+      <ChatPageContent />
+    </Suspense>
+  );
+}
+
+function ChatPageFallback() {
+  return (
+    <>
+      <Navbar />
+      <main className="mx-auto max-w-6xl px-4 py-8">
+        <Skeleton className="h-8 w-48 mb-6" />
+        <div className="flex gap-4">
+          <div className="w-80 space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-16 w-full rounded-card" />
+            ))}
+          </div>
+          <div className="flex-1 space-y-3">
+            <Skeleton className="h-12 w-full rounded-card" />
+            <Skeleton className="h-64 w-full rounded-card" />
+          </div>
+        </div>
+      </main>
+    </>
+  );
+}
+
+function ChatPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, profile, isLoading } = useAuthStore();
@@ -55,7 +85,7 @@ export default function ChatPage() {
     }
     if (!isLoading && user && !initialLoadDoneRef.current) {
       initialLoadDoneRef.current = true;
-      connectSocket(user.id).catch(console.error);
+      connectSocket(user.id).catch(() => {});
       (async () => {
         await fetchConversations();
         const userIdParam = queryUserIdParamRef.current;
@@ -76,19 +106,8 @@ export default function ChatPage() {
       if (!currentUser) return;
       const isMe = msg.senderId === currentUser.id;
       const otherId = isMe ? msg.receiverId : msg.senderId;
-      console.log("[ChatPage] message:received", {
-        messageId: msg.id,
-        senderId: msg.senderId,
-        receiverId: msg.receiverId,
-        otherId,
-        isMe,
-        content: msg.content.slice(0, 50),
-        socketId: socket.id,
-        selectedUserId: selectedUserIdRef.current,
-      });
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) {
-          console.log("[ChatPage] skipping duplicate message", msg.id);
           return prev;
         }
         return [...prev, msg];
@@ -115,12 +134,10 @@ export default function ChatPage() {
     };
 
     const onUserOnline = (payload: { userId: string }) => {
-      console.log("[ChatPage] user:online", payload);
       setOnlineUsers((prev) => new Set(prev).add(payload.userId));
     };
 
     const onUserOffline = (payload: { userId: string }) => {
-      console.log("[ChatPage] user:offline", payload);
       setOnlineUsers((prev) => {
         const next = new Set(prev);
         next.delete(payload.userId);
@@ -129,12 +146,10 @@ export default function ChatPage() {
     };
 
     const onTypingStart = (payload: { senderId: string }) => {
-      console.log("[ChatPage] typing:start", payload);
       setTypingUsers((prev) => new Set(prev).add(payload.senderId));
     };
 
     const onTypingStop = (payload: { senderId: string }) => {
-      console.log("[ChatPage] typing:stop", payload);
       setTypingUsers((prev) => {
         const next = new Set(prev);
         next.delete(payload.senderId);
@@ -148,14 +163,7 @@ export default function ChatPage() {
     socket.on("typing:start", onTypingStart);
     socket.on("typing:stop", onTypingStop);
 
-    console.log("[ChatPage] Socket listeners registered", {
-      socketId: socket.id,
-      connected: socket.connected,
-      userId: user.id,
-    });
-
     return () => {
-      console.log("[ChatPage] Cleaning up socket listeners", { socketId: socket.id });
       socket.off("message:received", onMessageReceived);
       socket.off("user:online", onUserOnline);
       socket.off("user:offline", onUserOffline);
@@ -244,15 +252,7 @@ export default function ChatPage() {
     const text = messageText.trim();
     setMessageText("");
     try {
-      console.log("[ChatPage] Sending message via HTTP", {
-        receiverId: selectedUserId,
-        contentPreview: text.slice(0, 50),
-      });
       const res = await sendMessage({ receiverId: selectedUserId, content: text });
-      console.log("[ChatPage] Message sent via HTTP", {
-        messageId: res?.message?.id,
-        receiverId: selectedUserId,
-      });
       if (res?.message) {
         setMessages((prev) => [...prev, res.message]);
       }

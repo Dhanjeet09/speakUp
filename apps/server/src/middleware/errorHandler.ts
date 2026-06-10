@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import type { AuthenticatedRequest } from "../types";
+import { env } from "../lib/env";
 import { logError } from "../lib/logger";
 
 export class AppError extends Error {
@@ -39,7 +40,7 @@ export function errorHandler(
   res.status(500).json({
     success: false,
     error:
-      process.env.NODE_ENV === "production"
+      env.NODE_ENV === "production"
         ? "Internal server error"
         : err.message,
   });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import type { User, AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { useAuthStore } from "@/store/useAuthStore";
 import { getSupabase } from "@/lib/supabase";
 import { get } from "@/lib/api/client";
@@ -32,7 +33,7 @@ export default function AuthProvider({
 
     const {
       data: { subscription },
-    } = getSupabase().auth.onAuthStateChange((_event, session) => {
+    } = getSupabase().auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       if (cancelled) return;
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -84,7 +85,7 @@ export default function AuthProvider({
         };
       }>("/api/auth/me");
       if (res?.profile) setProfile(res.profile);
-      if (res?.user) setUser(res.user as any);
+      if (res?.user) setUser(res.user as User);
     } catch {
     } finally {
       fetchingRef.current = false;

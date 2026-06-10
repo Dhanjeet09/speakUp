@@ -14,7 +14,12 @@
     "dev:web": "npm run dev -w apps/web",
     "dev:server": "npm run dev -w apps/server",
     "build:web": "npm run build -w apps/web",
-    "build:server": "npm run build -w apps/server"
+    "build:server": "npm run build -w apps/server",
+    "db:generate": "npx prisma generate --schema=apps/server/prisma/schema.prisma",
+    "db:migrate": "npx prisma migrate deploy --schema=apps/server/prisma/schema.prisma",
+    "db:seed": "npx prisma db seed --schema=apps/server/prisma/schema.prisma",
+    "start:server": "npm run start -w apps/server",
+    "start:web": "npm run start -w apps/web"
   },
   "packageManager": "npm@10.8.2",
   "devDependencies": {
@@ -23,10 +28,12 @@
     "turbo": "^2.0.0",
     "typescript": "^5.9.3"
   },
+  "optionalDependencies": {
+    "@next/swc-win32-x64-msvc": "^16.2.9",
+    "@rollup/rollup-win32-x64-msvc": "^4.61.1"
+  },
   "dependencies": {
     "@jridgewell/sourcemap-codec": "^1.5.5",
-    "@next/swc-win32-x64-msvc": "^16.2.7",
-    "@rollup/rollup-win32-x64-msvc": "^4.61.1",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.107.0",
     "magic-string": "^0.30.21",

@@ -1,12 +1,14 @@
 export {
   createSessionSchema,
+  rateSessionSchema,
 } from "./session";
-export type { CreateSessionInput } from "./session";
+export type { CreateSessionInput, RateSessionInput } from "./session";
 
 export {
   updateUserSchema,
+  suspendUserSchema,
 } from "./user";
-export type { UpdateUserInput } from "./user";
+export type { UpdateUserInput, SuspendUserInput } from "./user";
 
 export {
   createReportSchema,

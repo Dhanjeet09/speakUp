@@ -7,7 +7,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 
 export default function Navbar() {
   const pathname = usePathname();
-  const { user, profile } = useAuthStore();
+  const { user } = useAuthStore();
   const isAuthPage = pathname === "/login" || pathname === "/signup" || pathname === "/forgot-password";
   const isLanding = pathname === "/";
 

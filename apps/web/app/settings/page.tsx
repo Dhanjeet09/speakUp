@@ -69,7 +69,7 @@ export default function SettingsPage() {
       if (error) throw error;
       const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(filePath);
       const { updateUser } = await import("@/lib/api/users");
-      await updateUser(user.id, { avatarUrl: urlData.publicUrl } as any);
+      await updateUser(user.id, { avatarUrl: urlData.publicUrl });
       setProfile({ ...profile!, avatarUrl: urlData.publicUrl });
       toast.success("Avatar updated!");
     } catch (err: any) { toast.error(err.message || "Failed to upload"); } finally { setUploadingAvatar(false); }

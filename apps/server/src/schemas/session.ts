@@ -8,4 +8,9 @@ export const createSessionSchema = z.object({
   roomUrl: z.string().max(500).optional(),
 });
 
+export const rateSessionSchema = z.object({
+  positive: z.boolean({ required_error: "positive must be a boolean" }),
+});
+
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
+export type RateSessionInput = z.infer<typeof rateSessionSchema>;

@@ -13,4 +13,9 @@ export const updateUserSchema = z.object({
   interests: z.array(z.string().min(1)).optional(),
 });
 
+export const suspendUserSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+export type SuspendUserInput = z.infer<typeof suspendUserSchema>;

@@ -2,7 +2,8 @@ import { Router, Response } from "express";
 import { prisma } from "../lib/db";
 import { requireAuth, requireSameUser, requireAdmin } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
-import { updateUserSchema } from "../schemas";
+import { validateParamId } from "../middleware/validateParams";
+import { updateUserSchema, suspendUserSchema } from "../schemas";
 import { AppError, asyncHandler } from "../middleware/errorHandler";
 import { logInfo } from "../lib/logger";
 import sanitizeHtml from "sanitize-html";
@@ -98,6 +99,7 @@ router.get(
 router.get(
   "/:id",
   requireAuth,
+  validateParamId("id"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const user = await prisma.user.findUnique({
       where: { id: req.params.id },
@@ -119,6 +121,7 @@ router.patch(
   "/:id",
   requireAuth,
   requireSameUser,
+  validateParamId("id"),
   validateZod(updateUserSchema, ["name"]),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { name, username, country, timezone, nativeLanguage, bio, englishLevel, interests } = req.body;
@@ -158,6 +161,7 @@ router.get(
   "/:id/blocks",
   requireAuth,
   requireSameUser,
+  validateParamId("id"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const blocks = await prisma.block.findMany({
       where: { blockerId: req.params.id },
@@ -209,6 +213,8 @@ router.patch(
   "/:id/suspend",
   requireAuth,
   requireAdmin,
+  validateParamId("id"),
+  validateZod(suspendUserSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { reason } = req.body;
     const user = await prisma.user.update({
@@ -225,6 +231,7 @@ router.patch(
   "/:id/unsuspend",
   requireAuth,
   requireAdmin,
+  validateParamId("id"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const user = await prisma.user.update({
       where: { id: req.params.id },
@@ -240,6 +247,7 @@ router.delete(
   "/:id",
   requireAuth,
   requireSameUser,
+  validateParamId("id"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     await prisma.user.delete({ where: { id: req.params.id } });
     logInfo("User", "Account deleted", { userId: req.params.id });
