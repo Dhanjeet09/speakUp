@@ -97,6 +97,41 @@ router.get(
 );
 
 router.get(
+  "/discoverable",
+  requireAuth,
+  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const userId = req.userId!;
+
+    const blocks = await prisma.block.findMany({
+      where: { blockerId: userId },
+      select: { blockedId: true },
+    });
+    const blockedIds = blocks.map((b) => b.blockedId);
+
+    const users = await prisma.user.findMany({
+      where: {
+        id: { not: userId, notIn: blockedIds },
+        isSuspended: false,
+      },
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        country: true,
+        avatarUrl: true,
+        englishLevel: true,
+        interests: true,
+        totalSessions: true,
+      },
+      take: 20,
+      orderBy: { totalSessions: "desc" },
+    });
+
+    res.json({ success: true, data: { users } });
+  })
+);
+
+router.get(
   "/:id",
   requireAuth,
   validateParamId("id"),
@@ -171,41 +206,6 @@ router.get(
       success: true,
       data: { blockedIds: blocks.map((b) => b.blockedId) },
     });
-  })
-);
-
-router.get(
-  "/discoverable",
-  requireAuth,
-  asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const userId = req.userId!;
-
-    const blocks = await prisma.block.findMany({
-      where: { blockerId: userId },
-      select: { blockedId: true },
-    });
-    const blockedIds = blocks.map((b) => b.blockedId);
-
-    const users = await prisma.user.findMany({
-      where: {
-        id: { not: userId, notIn: blockedIds },
-        isSuspended: false,
-      },
-      select: {
-        id: true,
-        name: true,
-        username: true,
-        country: true,
-        avatarUrl: true,
-        englishLevel: true,
-        interests: true,
-        totalSessions: true,
-      },
-      take: 20,
-      orderBy: { totalSessions: "desc" },
-    });
-
-    res.json({ success: true, data: { users } });
   })
 );
 

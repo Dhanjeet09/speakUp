@@ -1,4 +1,5 @@
 import { Router, Response } from "express";
+import rateLimit from "express-rate-limit";
 import { prisma } from "../lib/db";
 import { requireAuth } from "../middleware/auth";
 import { validateZod } from "../middleware/validateZod";
@@ -9,6 +10,14 @@ import { logInfo, logWarn } from "../lib/logger";
 import type { AuthenticatedRequest } from "../types";
 
 const router = Router();
+
+const sensitiveLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many attempts, please try again later" },
+});
 
 const verifyHandler = asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   let profile = await prisma.user.findUnique({
@@ -74,6 +83,7 @@ const verifyHandler = asyncHandler(async (req: AuthenticatedRequest, res: Respon
 
 router.post(
   "/forgot-password",
+  sensitiveLimiter,
   validateZod(forgotPasswordSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { email } = req.body;
@@ -88,6 +98,7 @@ router.post(
 
 router.post(
   "/register",
+  sensitiveLimiter,
   validateZod(registerSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { email, password } = req.body;
@@ -104,6 +115,7 @@ router.post(
 
 router.post(
   "/login",
+  sensitiveLimiter,
   validateZod(loginSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { email, password } = req.body;

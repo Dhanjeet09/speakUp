@@ -15,7 +15,7 @@ let currentUserId: string | null = null;
 export function getSocket(): TypedSocket {
   if (!socket) {
     socket = io(SOCKET_URL, {
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
       autoConnect: false,
       reconnection: true,
       reconnectionAttempts: 5,

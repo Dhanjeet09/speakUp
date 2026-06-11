@@ -8,7 +8,7 @@ export function proxy(request: NextRequest) {
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set(
     "Permissions-Policy",
-    "camera=(), microphone=()"
+    "camera=(self), microphone=(self)"
   );
   return response;
 }
