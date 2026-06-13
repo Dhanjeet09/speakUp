@@ -93,7 +93,7 @@ export default function ProfilePage() {
             {profile.name?.[0]?.toUpperCase() || "?"}
           </div>
           <h1 className="mt-4 text-2xl font-bold">{profile.name || "Anonymous"}</h1>
-          <p className="text-sm text-gray-500">{profile.email}</p>
+          {isOwnProfile && <p className="text-sm text-gray-500">{profile.email}</p>}
           <div className="mt-3 flex gap-2">
             {profile.englishLevel && <Badge>{profile.englishLevel}</Badge>}
             {profile.country && <Badge variant="outline">{profile.country}</Badge>}

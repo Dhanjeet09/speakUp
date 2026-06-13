@@ -25,9 +25,7 @@ const userSelect = {
   totalMinutes: true,
   totalSessions: true,
   currentStreak: true,
-  role: true,
   createdAt: true,
-  isSuspended: true,
 } as const;
 
 router.get(
@@ -74,8 +72,12 @@ router.get(
       return;
     }
 
+    const userId = req.userId!;
+
     const users = await prisma.user.findMany({
       where: {
+        isSuspended: false,
+        id: { not: userId },
         OR: [
           { name: { contains: q, mode: "insensitive" } },
           { username: { contains: q, mode: "insensitive" } },
@@ -92,7 +94,17 @@ router.get(
       take: 10,
     });
 
-    res.json({ success: true, data: { users } });
+    const [blockedByMe, blockedByOthers] = await Promise.all([
+      prisma.block.findMany({ where: { blockerId: userId }, select: { blockedId: true } }),
+      prisma.block.findMany({ where: { blockedId: userId }, select: { blockerId: true } }),
+    ]);
+    const blockedIds = new Set([
+      ...blockedByMe.map(b => b.blockedId),
+      ...blockedByOthers.map(b => b.blockerId),
+    ]);
+    const filteredUsers = users.filter((u) => !blockedIds.has(u.id));
+
+    res.json({ success: true, data: { users: filteredUsers } });
   })
 );
 
@@ -102,32 +114,42 @@ router.get(
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.userId!;
 
-    const blocks = await prisma.block.findMany({
-      where: { blockerId: userId },
-      select: { blockedId: true },
-    });
-    const blockedIds = blocks.map((b) => b.blockedId);
+    const [blockedByMe, blockedByOthers, users] = await Promise.all([
+      prisma.block.findMany({
+        where: { blockerId: userId },
+        select: { blockedId: true },
+      }),
+      prisma.block.findMany({
+        where: { blockedId: userId },
+        select: { blockerId: true },
+      }),
+      prisma.user.findMany({
+        where: {
+          id: { not: userId },
+          isSuspended: false,
+        },
+        select: {
+          id: true,
+          name: true,
+          username: true,
+          country: true,
+          avatarUrl: true,
+          englishLevel: true,
+          interests: true,
+          totalSessions: true,
+        },
+        take: 20,
+        orderBy: { totalSessions: "desc" },
+      }),
+    ]);
 
-    const users = await prisma.user.findMany({
-      where: {
-        id: { not: userId, notIn: blockedIds },
-        isSuspended: false,
-      },
-      select: {
-        id: true,
-        name: true,
-        username: true,
-        country: true,
-        avatarUrl: true,
-        englishLevel: true,
-        interests: true,
-        totalSessions: true,
-      },
-      take: 20,
-      orderBy: { totalSessions: "desc" },
-    });
+    const blockedIds = new Set([
+      ...blockedByMe.map(b => b.blockedId),
+      ...blockedByOthers.map(b => b.blockerId),
+    ]);
+    const filteredUsers = users.filter((u) => !blockedIds.has(u.id));
 
-    res.json({ success: true, data: { users } });
+    res.json({ success: true, data: { users: filteredUsers } });
   })
 );
 
@@ -136,8 +158,23 @@ router.get(
   requireAuth,
   validateParamId("id"),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const targetId = req.params.id;
+
+    const [blockedByMe, blockedByOthers] = await Promise.all([
+      prisma.block.findUnique({
+        where: { blockerId_blockedId: { blockerId: req.userId!, blockedId: targetId } },
+      }),
+      prisma.block.findUnique({
+        where: { blockerId_blockedId: { blockerId: targetId, blockedId: req.userId! } },
+      }),
+    ]);
+
+    if (blockedByMe || blockedByOthers) {
+      throw new AppError("User not found", 404);
+    }
+
     const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
+      where: { id: targetId },
       select: userSelect,
     });
 
@@ -155,20 +192,11 @@ router.get(
 router.patch(
   "/:id",
   requireAuth,
-  requireSameUser,
   validateParamId("id"),
+  requireSameUser,
   validateZod(updateUserSchema, ["name"]),
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { name, username, country, timezone, nativeLanguage, bio, englishLevel, interests } = req.body;
-
-    if (username !== undefined) {
-      const existingUser = await prisma.user.findUnique({
-        where: { username },
-      });
-      if (existingUser && existingUser.id !== req.params.id) {
-        throw new AppError("Username is already taken", 409);
-      }
-    }
 
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name.trim();
@@ -182,10 +210,21 @@ router.patch(
       updateData.interests = interests.map((i: string) => i.trim()).filter(Boolean);
     }
 
-    const user = await prisma.user.update({
-      where: { id: req.params.id },
-      data: updateData,
-      select: userSelect,
+    const user = await prisma.$transaction(async (tx) => {
+      if (username !== undefined) {
+        const existingUser = await tx.user.findUnique({
+          where: { username },
+        });
+        if (existingUser && existingUser.id !== req.params.id) {
+          throw new AppError("Username is already taken", 409);
+        }
+      }
+
+      return tx.user.update({
+        where: { id: req.params.id },
+        data: updateData,
+        select: userSelect,
+      });
     });
 
     res.json({ success: true, data: { user } });

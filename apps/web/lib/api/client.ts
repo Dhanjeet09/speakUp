@@ -28,6 +28,25 @@ async function getAccessToken(): Promise<string | null> {
   }
 }
 
+let refreshing: Promise<boolean> | null = null;
+
+async function handleUnauthorized(): Promise<boolean> {
+  if (!refreshing) {
+    refreshing = (async () => {
+      try {
+        const supabase = getSupabase();
+        const { data } = await supabase.auth.refreshSession();
+        return !!data.session;
+      } catch {
+        return false;
+      } finally {
+        refreshing = null;
+      }
+    })();
+  }
+  return refreshing;
+}
+
 async function apiCall<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -55,6 +74,32 @@ async function apiCall<T>(
     });
 
     clearTimeout(timeoutId);
+
+    if (res.status === 401) {
+      const refreshed = await handleUnauthorized();
+      if (refreshed) {
+        const newToken = await getAccessToken();
+        if (newToken) {
+          headers["Authorization"] = `Bearer ${newToken}`;
+        }
+        const retryController = new AbortController();
+        const retryTimeoutId = setTimeout(() => retryController.abort(), 10000);
+        const retryRes = await fetch(`${API_URL}${endpoint}`, {
+          credentials: "include",
+          headers,
+          signal: retryController.signal,
+          ...options,
+        });
+        clearTimeout(retryTimeoutId);
+        if (!retryRes.ok) {
+          const body = await retryRes.json().catch(() => ({}));
+          throw new ApiError(retryRes.status, body.error || `Request failed with status ${retryRes.status}`);
+        }
+        return retryRes.json() as Promise<T>;
+      }
+      window.location.href = "/login";
+      throw new ApiError(401, "Session expired");
+    }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

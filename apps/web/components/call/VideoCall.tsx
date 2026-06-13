@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useCallStore } from "@/store/useCallStore";
-import type { MediaConnection } from "peerjs";
+import type { MediaConnection, default as Peer } from "peerjs";
 import {
   createPeer,
   startLocalStream,
@@ -13,8 +13,10 @@ import {
   toggleMute,
   toggleCamera,
   endCall,
+  releaseLocalStream,
   mapPeerError,
   startSpeakingDetection,
+  isVideoActive,
 } from "@/lib/webrtc";
 import { Button } from "@/components/ui/button";
 import ReportModal from "./ReportModal";
@@ -44,7 +46,8 @@ export default function VideoCall({
   const { isMuted, isCameraOff, setIsMuted, setIsCameraOff } = useCallStore();
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const peerRef = useRef<ReturnType<typeof createPeer> | null>(null);
+  type PeerWithEvents = Peer & { off(event: string, fn?: (...args: any[]) => void): void; once(event: string, fn: (...args: any[]) => void): void };
+  const peerRef = useRef<PeerWithEvents | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
   const [quality, setQuality] = useState<ConnectionQuality>("good");
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -52,6 +55,7 @@ export default function VideoCall({
   const onEndCallRef = useRef(onEndCall);
   onEndCallRef.current = onEndCall;
   const stopDetectionRef = useRef<(() => void) | null>(null);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
 
   useEffect(() => {
     if (!("mediaDevices" in navigator)) {
@@ -64,16 +68,18 @@ export default function VideoCall({
     if (!user) return;
     const currentUserId = user.id;
     let cancelled = false;
+    const mountedRef = { current: true };
 
     async function init() {
       try {
         const stream = await startLocalStream();
         if (cancelled) return;
+        setIsVideoEnabled(isVideoActive());
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
 
-        const p = createPeer(currentUserId);
+        const p = createPeer(currentUserId) as PeerWithEvents;
         peerRef.current = p;
 
         let callPromise: Promise<MediaConnection> | null = null;
@@ -97,6 +103,7 @@ export default function VideoCall({
 
           p.on("open", async () => {
             clearTimeout(peerOpenTimeout);
+            (p as any).off("error");
             if (cancelled) return;
 
             try {
@@ -107,23 +114,81 @@ export default function VideoCall({
                   return;
                 }
 
-                const remoteStream = await new Promise<MediaStream>(
-                  (resolve, reject) => {
+                const remoteStream = await (async function attemptCall(
+                  attempt: number
+                ): Promise<MediaStream> {
+                  return new Promise<MediaStream>((resolve, reject) => {
+                    if (!mountedRef.current) {
+                      reject(new Error("Component unmounted"));
+                      return;
+                    }
+                    let resolved = false;
                     const callTimeout = setTimeout(() => {
-                      reject(new Error("Call connection timed out"));
+                      if (!resolved) {
+                        resolved = true;
+                        if (attempt < 3) {
+                          setTimeout(
+                            () => {
+                              if (!mountedRef.current) return;
+                              attemptCall(attempt + 1).then(resolve, reject);
+                            },
+                            1000
+                          );
+                        } else {
+                          reject(new Error("Call connection timed out"));
+                        }
+                      }
                     }, 20000);
 
-                    p.on("error", (err: any) => {
-                      clearTimeout(callTimeout);
-                      reject(mapPeerError(err));
-                    });
+                    const onPeerError = (err: any) => {
+                      if (!resolved) {
+                        resolved = true;
+                        if (attempt < 3) {
+                          clearTimeout(callTimeout);
+                          setTimeout(
+                            () => {
+                              if (!mountedRef.current) return;
+                              attemptCall(attempt + 1).then(resolve, reject);
+                            },
+                            1000
+                          );
+                        } else {
+                          clearTimeout(callTimeout);
+                          reject(mapPeerError(err));
+                        }
+                      }
+                    };
 
-                    initiateCall(partnerPeerId, local, (remote) => {
-                      clearTimeout(callTimeout);
-                      resolve(remote);
-                    });
-                  }
-                );
+                    p.once("error", onPeerError);
+
+                    try {
+                      initiateCall(partnerPeerId, local, (remote) => {
+                        if (!resolved) {
+                          resolved = true;
+                          clearTimeout(callTimeout);
+                          resolve(remote);
+                        }
+                      });
+                    } catch (callErr) {
+                      if (!resolved) {
+                        resolved = true;
+                        if (attempt < 3) {
+                          clearTimeout(callTimeout);
+                          setTimeout(
+                            () => {
+                              if (!mountedRef.current) return;
+                              attemptCall(attempt + 1).then(resolve, reject);
+                            },
+                            1000
+                          );
+                        } else {
+                          clearTimeout(callTimeout);
+                          reject(callErr);
+                        }
+                      }
+                    }
+                  });
+                })(1);
 
                 if (cancelled) return;
                 if (remoteVideoRef.current) {
@@ -164,11 +229,14 @@ export default function VideoCall({
 
     return () => {
       cancelled = true;
+      mountedRef.current = false;
       if (stopDetectionRef.current) {
         stopDetectionRef.current();
         stopDetectionRef.current = null;
       }
       endCall();
+      releaseLocalStream();
+      (peerRef.current as any)?.off("call");
       peerRef.current = null;
     };
   }, [user, partnerPeerId, isCaller]);
@@ -279,8 +347,8 @@ export default function VideoCall({
   }, [handleMute, handleCamera, handleEndCall]);
 
   useEffect(() => {
+    const originalHeight = document.body.style.height;
     function onResize() {
-      // Force reflow on orientation change — CSS handles the layout
       document.body.style.height = window.innerHeight + "px";
     }
     window.addEventListener("resize", onResize);
@@ -288,6 +356,7 @@ export default function VideoCall({
     return () => {
       window.removeEventListener("resize", onResize);
       window.removeEventListener("orientationchange", onResize);
+      document.body.style.height = originalHeight;
     };
   }, []);
 
@@ -361,6 +430,11 @@ export default function VideoCall({
               aria-label="Your camera feed"
               onLoadedData={() => setLocalLoaded(true)}
             />
+            {!isVideoEnabled && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                <span className="text-xs text-white">Camera not available</span>
+              </div>
+            )}
         </div>
         <div
           className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-black/60 px-4 py-1 text-sm text-white"

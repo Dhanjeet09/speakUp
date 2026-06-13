@@ -50,7 +50,16 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       const { updateUser } = await import("@/lib/api/users");
-      await updateUser(user.id, { name, country, englishLevel, interests, username, timezone, nativeLanguage, bio });
+      const payload: Record<string, unknown> = {};
+      if (name && name !== profile?.name) payload.name = name;
+      if (country !== profile?.country) payload.country = country;
+      if (englishLevel !== profile?.englishLevel) payload.englishLevel = englishLevel;
+      if (JSON.stringify(interests) !== JSON.stringify(profile?.interests)) payload.interests = interests;
+      if (username !== profile?.username) payload.username = username;
+      if (timezone !== profile?.timezone) payload.timezone = timezone;
+      if (nativeLanguage !== profile?.nativeLanguage) payload.nativeLanguage = nativeLanguage;
+      if (bio !== profile?.bio) payload.bio = bio;
+      await updateUser(user.id, payload);
       setProfile({ ...profile!, name, country, englishLevel, interests, username, timezone, nativeLanguage, bio });
       toast.success("Settings saved!");
     } catch (err: any) { toast.error(err.message || "Failed to save"); } finally { setSaving(false); }

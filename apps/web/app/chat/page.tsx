@@ -63,11 +63,14 @@ function ChatPageContent() {
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
+  const socketRef = useRef<ReturnType<typeof getSocket> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedUserIdRef = useRef<string | null>(null);
   const initialLoadDoneRef = useRef(false);
   const userRef = useRef(user);
+  const chatListenersRegisteredRef = useRef(false);
+  const lastTypingEmitRef = useRef(0);
   userRef.current = user;
 
   const queryUserIdParamRef = useRef<string | null>(null);
@@ -78,38 +81,23 @@ function ChatPageContent() {
     }
   }
 
-  useEffect(() => {
-    if (!isLoading && !user) {
-      router.push("/login");
-      return;
-    }
-    if (!isLoading && user && !initialLoadDoneRef.current) {
-      initialLoadDoneRef.current = true;
-      connectSocket(user.id).catch(() => {});
-      (async () => {
-        await fetchConversations();
-        const userIdParam = queryUserIdParamRef.current;
-        if (userIdParam && userIdParam !== user.id) {
-          selectConversation(userIdParam);
-        }
-      })();
-    }
-  }, [user?.id, isLoading]);
-
-  useEffect(() => {
-    if (!user?.id) return;
+  function registerChatListeners() {
     const socket = getSocket();
+    socket.off("message:received");
+    socket.off("user:online");
+    socket.off("user:offline");
+    socket.off("typing:start");
+    socket.off("typing:stop");
+    socket.off("disconnect");
 
-    const onMessageReceived = (payload: { message: MessageData }) => {
+    socket.on("message:received", (payload: { message: MessageData }) => {
       const msg = payload.message;
       const currentUser = userRef.current;
       if (!currentUser) return;
       const isMe = msg.senderId === currentUser.id;
       const otherId = isMe ? msg.receiverId : msg.senderId;
       setMessages((prev) => {
-        if (prev.some((m) => m.id === msg.id)) {
-          return prev;
-        }
+        if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
       setConversations((prev) => {
@@ -131,45 +119,63 @@ function ChatPageContent() {
       if (selectedUserIdRef.current === otherId) {
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
       }
-    };
+    });
 
-    const onUserOnline = (payload: { userId: string }) => {
+    socket.on("user:online", (payload: { userId: string }) => {
       setOnlineUsers((prev) => new Set(prev).add(payload.userId));
-    };
+    });
 
-    const onUserOffline = (payload: { userId: string }) => {
+    socket.on("user:offline", (payload: { userId: string }) => {
       setOnlineUsers((prev) => {
         const next = new Set(prev);
         next.delete(payload.userId);
         return next;
       });
-    };
+    });
 
-    const onTypingStart = (payload: { senderId: string }) => {
+    socket.on("typing:start", (payload: { senderId: string }) => {
       setTypingUsers((prev) => new Set(prev).add(payload.senderId));
-    };
+    });
 
-    const onTypingStop = (payload: { senderId: string }) => {
+    socket.on("typing:stop", (payload: { senderId: string }) => {
       setTypingUsers((prev) => {
         const next = new Set(prev);
         next.delete(payload.senderId);
         return next;
       });
-    };
+    });
 
-    socket.on("message:received", onMessageReceived);
-    socket.on("user:online", onUserOnline);
-    socket.on("user:offline", onUserOffline);
-    socket.on("typing:start", onTypingStart);
-    socket.on("typing:stop", onTypingStop);
+    socket.on("disconnect", () => setOnlineUsers(new Set()));
+    (socket as any).on("reconnect", () => setOnlineUsers(new Set()));
 
-    return () => {
-      socket.off("message:received", onMessageReceived);
-      socket.off("user:online", onUserOnline);
-      socket.off("user:offline", onUserOffline);
-      socket.off("typing:start", onTypingStart);
-      socket.off("typing:stop", onTypingStop);
-    };
+    chatListenersRegisteredRef.current = true;
+  }
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push("/login");
+      return;
+    }
+    if (!isLoading && user && !initialLoadDoneRef.current) {
+      initialLoadDoneRef.current = true;
+      connectSocket(user.id).then(() => {
+        registerChatListeners();
+      }).catch(() => {});
+      (async () => {
+        await fetchConversations();
+        const userIdParam = queryUserIdParamRef.current;
+        if (userIdParam && userIdParam !== user.id) {
+          selectConversation(userIdParam);
+        }
+      })();
+    }
+  }, [user?.id, isLoading]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (!chatListenersRegisteredRef.current) {
+      registerChatListeners();
+    }
   }, [user?.id]);
 
   useEffect(() => {
@@ -238,6 +244,9 @@ function ChatPageContent() {
 
   function handleTyping() {
     if (!selectedUserId) return;
+    const now = Date.now();
+    if (now - lastTypingEmitRef.current < 2000) return;
+    lastTypingEmitRef.current = now;
     emitTypingStart({ receiverId: selectedUserId });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
@@ -370,7 +379,7 @@ function ChatPageContent() {
                         emitFriendCall({
                           friendId: selectedUserId,
                           roomId,
-                          callerName: profile?.name || user?.email || "Unknown",
+                          callerName: profile?.name || profile?.username || "Someone",
                         });
                         toast.success("Calling...");
                       }}

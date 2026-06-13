@@ -32,7 +32,12 @@ router.get(
         status: "accepted",
         OR: [{ requesterId: userId }, { addresseeId: userId }],
       },
-      include: {
+      select: {
+        id: true,
+        requesterId: true,
+        addresseeId: true,
+        status: true,
+        createdAt: true,
         requester: { select: friendProfileSelect },
         addressee: { select: friendProfileSelect },
       },
@@ -70,7 +75,12 @@ router.get(
         addresseeId: userId,
         status: "pending",
       },
-      include: {
+      select: {
+        id: true,
+        requesterId: true,
+        addresseeId: true,
+        status: true,
+        createdAt: true,
         requester: { select: friendProfileSelect },
       },
       orderBy: { createdAt: "desc" },
@@ -101,7 +111,12 @@ router.get(
         requesterId: userId,
         status: "pending",
       },
-      include: {
+      select: {
+        id: true,
+        requesterId: true,
+        addresseeId: true,
+        status: true,
+        createdAt: true,
         addressee: { select: friendProfileSelect },
       },
       orderBy: { createdAt: "desc" },
@@ -151,7 +166,7 @@ router.post(
       if (existing.status === "accepted") {
         throw new AppError("Already friends", 409);
       }
-      if (existing.status === "blocked") {
+      if (existing.status === "rejected") {
         throw new AppError("Cannot send friend request", 400);
       }
       if (existing.status === "pending") {
@@ -165,7 +180,12 @@ router.post(
         addresseeId,
         status: "pending",
       },
-      include: {
+      select: {
+        id: true,
+        requesterId: true,
+        addresseeId: true,
+        status: true,
+        createdAt: true,
         requester: { select: friendProfileSelect },
       },
     });
@@ -220,6 +240,18 @@ router.post(
       throw new AppError("Friend request is no longer pending", 400);
     }
 
+    const [blocker, blocked] = await Promise.all([
+      prisma.block.findUnique({
+        where: { blockerId_blockedId: { blockerId: userId, blockedId: friendship.requesterId } },
+      }),
+      prisma.block.findUnique({
+        where: { blockerId_blockedId: { blockerId: friendship.requesterId, blockedId: userId } },
+      }),
+    ]);
+    if (blocker || blocked) {
+      throw new AppError("Cannot accept friend request from this user", 403);
+    }
+
     const updated = await prisma.friendship.update({
       where: { id },
       data: { status: "accepted" },
@@ -254,7 +286,10 @@ router.post(
       throw new AppError("Friend request is no longer pending", 400);
     }
 
-    await prisma.friendship.delete({ where: { id } });
+    await prisma.friendship.update({
+      where: { id },
+      data: { status: "rejected" },
+    });
 
     res.json({ success: true });
   })

@@ -69,6 +69,15 @@ router.post(
       },
     });
 
+    await prisma.friendship.deleteMany({
+      where: {
+        OR: [
+          { requesterId: req.userId!, addresseeId: blockedId },
+          { requesterId: blockedId, addresseeId: req.userId! },
+        ],
+      },
+    });
+
     res.status(201).json({ success: true, data: { block } });
   })
 );
@@ -84,7 +93,14 @@ router.get(
 
     const [reports, total] = await Promise.all([
       prisma.report.findMany({
-        include: {
+        select: {
+          id: true,
+          reporterId: true,
+          reportedId: true,
+          reason: true,
+          note: true,
+          createdAt: true,
+          resolved: true,
           reporter: { select: { id: true, name: true } },
           reported: { select: { id: true, name: true } },
         },
@@ -117,7 +133,14 @@ router.get(
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const reports = await prisma.report.findMany({
       where: { resolved: false },
-      include: {
+      select: {
+        id: true,
+        reporterId: true,
+        reportedId: true,
+        reason: true,
+        note: true,
+        createdAt: true,
+        resolved: true,
         reporter: { select: { id: true, name: true } },
         reported: { select: { id: true, name: true } },
       },

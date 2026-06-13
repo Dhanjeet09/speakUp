@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import { getSocket, connectSocket } from "@/lib/socket";
@@ -20,6 +20,14 @@ export default function FriendCallHandler() {
   const { user } = useAuthStore();
   const [incoming, setIncoming] = useState<IncomingCall | null>(null);
   const answeredRef = useRef(false);
+  const incomingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearIncomingTimeout() {
+    if (incomingTimeoutRef.current) {
+      clearTimeout(incomingTimeoutRef.current);
+      incomingTimeoutRef.current = null;
+    }
+  }
 
   useEffect(() => {
     if (!user) return;
@@ -31,13 +39,26 @@ export default function FriendCallHandler() {
       setIncoming(payload);
       answeredRef.current = false;
       toast(`${payload.callerName} is calling...`, { duration: 15000 });
+
+      clearIncomingTimeout();
+      incomingTimeoutRef.current = setTimeout(() => {
+        if (!answeredRef.current) {
+          answeredRef.current = true;
+          const socket = getSocket();
+          socket.emit("friend:call-answer", { callerId: payload.callerId, accepted: false, roomId: payload.roomId });
+          setIncoming(null);
+          toast.error("Call timed out", { id: "call-timed-out" });
+        }
+      }, 30000);
     };
 
-    const onCallAnswer = (payload: { callerId: string; accepted: boolean }) => {
+    const onCallAnswer = (payload: { callerId: string; accepted: boolean; roomId?: string; answererId?: string }) => {
+      clearIncomingTimeout();
       if (payload.accepted) {
         toast.success("Call accepted!");
-        const roomId = `call_${[user.id, payload.callerId].sort().join("_")}`;
-        routerRef.current.push(`/match?room=${roomId}&partner=${payload.callerId}`);
+        const roomId = payload.roomId || `call_${[user.id, payload.callerId].sort().join("_")}`;
+        const partnerId = payload.answererId || payload.callerId;
+        routerRef.current.push(`/match?room=${roomId}&partner=${partnerId}`);
       } else {
         toast.error("Call declined", { id: "call-declined" });
       }
@@ -47,6 +68,7 @@ export default function FriendCallHandler() {
     socket.on("friend:call-answer", onCallAnswer);
 
     return () => {
+      clearIncomingTimeout();
       socket.off("friend:calling", onCalling);
       socket.off("friend:call-answer", onCallAnswer);
     };
@@ -54,18 +76,20 @@ export default function FriendCallHandler() {
 
   function handleAcceptCall() {
     if (!incoming || answeredRef.current) return;
+    clearIncomingTimeout();
     answeredRef.current = true;
     const socket = getSocket();
-    socket.emit("friend:call-answer", { callerId: incoming.callerId, accepted: true });
+    socket.emit("friend:call-answer", { callerId: incoming.callerId, accepted: true, roomId: incoming.roomId, answererId: user?.id });
     setIncoming(null);
     router.push(`/match?room=${incoming.roomId}&partner=${incoming.callerId}`);
   }
 
   function handleDeclineCall() {
     if (!incoming || answeredRef.current) return;
+    clearIncomingTimeout();
     answeredRef.current = true;
     const socket = getSocket();
-    socket.emit("friend:call-answer", { callerId: incoming.callerId, accepted: false });
+    socket.emit("friend:call-answer", { callerId: incoming.callerId, accepted: false, roomId: incoming.roomId });
     setIncoming(null);
   }
 
