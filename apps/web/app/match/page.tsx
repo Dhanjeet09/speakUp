@@ -60,6 +60,8 @@ export default function MatchPage() {
   const sessionCreatedRef = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
   const confettiFiredRef = useRef(false);
+  const matchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isQueuedRef = useRef(false);
 
   useEffect(() => {
     if (state === "MATCHED" && !confettiFiredRef.current) {
@@ -78,15 +80,7 @@ export default function MatchPage() {
     if (state === "ENDED") {
       setRatingTimer(5);
       ratingIntervalRef.current = setInterval(() => {
-        setRatingTimer((prev) => {
-          if (prev <= 1) {
-            if (ratingIntervalRef.current) clearInterval(ratingIntervalRef.current);
-            ratingIntervalRef.current = null;
-            reset();
-            return 0;
-          }
-          return prev - 1;
-        });
+        setRatingTimer((prev) => prev - 1);
       }, 1000);
     }
     return () => {
@@ -95,7 +89,17 @@ export default function MatchPage() {
         ratingIntervalRef.current = null;
       }
     };
-  }, [state, reset]);
+  }, [state]);
+
+  useEffect(() => {
+    if (state === "ENDED" && ratingTimer === 0) {
+      if (ratingIntervalRef.current) {
+        clearInterval(ratingIntervalRef.current);
+        ratingIntervalRef.current = null;
+      }
+      reset();
+    }
+  }, [state, ratingTimer, reset]);
 
   useEffect(() => {
     if (state !== "ENDED") return;
@@ -189,65 +193,19 @@ export default function MatchPage() {
       socket.connect();
     }
 
-    const onQueuePosition = ({ waitingCount: c }: { waitingCount: number }) => {
-      setWaitingCount(c);
-    };
-
-    const onMatchFound = (data: {
-      partner: { name: string; country: string; level: string; username: string };
-      roomId: string;
-      isCaller: boolean;
-      partnerUserId: string;
-    }) => {
-      sessionCreatedRef.current = false;
-      setPartner(data.partner);
-      setRoomId(data.roomId);
-      setIsCaller(data.isCaller);
-      setPartnerUserId(data.partnerUserId);
-      setPartnerPeerId(data.partnerUserId);
-      setState("MATCHED");
-      toast.success("Match found!");
-      setTimeout(() => setState("IN_CALL"), 2000);
-    };
-
-    const onPartnerLeft = () => {
-      toast.error("Your partner left the call");
-      handleEndCallRef.current();
-    };
-
-    const onMatchAccepted = (data: { userId: string }) => {
-      toast.success("Match request accepted!");
-    };
-
-    const onMatchRejected = (data: { userId: string }) => {
-      toast("Match request declined", { icon: "💬" });
-      setState("IDLE");
-    };
-
-    const onUserOnline = (data: { userId: string }) => {
-    };
-
-    const onUserOffline = (data: { userId: string }) => {
-    };
-
-    socket.on("queuePosition", onQueuePosition);
-    socket.on("matchFound", onMatchFound);
-    socket.on("partnerLeft", onPartnerLeft);
-    socket.on("match:accepted", onMatchAccepted);
-    socket.on("match:rejected", onMatchRejected);
-    socket.on("user:online", onUserOnline);
-    socket.on("user:offline", onUserOffline);
-
-    return () => {
-      socket.off("queuePosition", onQueuePosition);
-      socket.off("matchFound", onMatchFound);
-      socket.off("partnerLeft", onPartnerLeft);
-      socket.off("match:accepted", onMatchAccepted);
-      socket.off("match:rejected", onMatchRejected);
-      socket.off("user:online", onUserOnline);
-      socket.off("user:offline", onUserOffline);
-    };
+    registerMatchListeners(socket);
   }, [state, setPartner, setRoomId, setIsCaller, setWaitingCount, setState]);
+
+  useEffect(() => {
+    return () => {
+      if (matchTimeoutRef.current) clearTimeout(matchTimeoutRef.current);
+      if (isQueuedRef.current) {
+        const socket = getSocket();
+        if (socket.connected) socket.emit("leaveQueue");
+      }
+      disconnectSocket();
+    };
+  }, []);
 
   useEffect(() => {
     if (state !== "SEARCHING") return;
@@ -268,6 +226,56 @@ export default function MatchPage() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [state]);
 
+  function registerMatchListeners(socket: ReturnType<typeof getSocket>) {
+    socket.off("queuePosition");
+    socket.off("matchFound");
+    socket.off("partnerLeft");
+    socket.off("match:accepted");
+    socket.off("match:rejected");
+    socket.off("error");
+
+    socket.on("queuePosition", ({ waitingCount: c }: { waitingCount: number }) => {
+      setWaitingCount(c);
+    });
+
+    socket.on("matchFound", (data: {
+      partner: { name: string; country: string; level: string; username: string };
+      roomId: string;
+      isCaller: boolean;
+      partnerUserId: string;
+    }) => {
+      sessionCreatedRef.current = false;
+      setPartner(data.partner);
+      setRoomId(data.roomId);
+      setIsCaller(data.isCaller);
+      setPartnerUserId(data.partnerUserId);
+      setPartnerPeerId(data.partnerUserId);
+      setState("MATCHED");
+      toast.success("Match found!");
+      if (matchTimeoutRef.current) clearTimeout(matchTimeoutRef.current);
+      matchTimeoutRef.current = setTimeout(() => setState("IN_CALL"), 2000);
+    });
+
+    socket.on("partnerLeft", () => {
+      toast.error("Your partner left the call");
+      handleEndCallRef.current();
+    });
+
+    socket.on("match:accepted", () => {
+      toast.success("Match request accepted!");
+    });
+
+    socket.on("match:rejected", () => {
+      toast("Match request declined", { icon: "💬" });
+      setState("IDLE");
+    });
+
+    socket.on("error", (payload: { message: string }) => {
+      toast.error(payload.message);
+      setState("IDLE");
+    });
+  }
+
   function handleJoinQueue() {
     if (!user || !profile) return;
     setState("PERMISSION_CHECK");
@@ -276,15 +284,23 @@ export default function MatchPage() {
   function proceedToSearch() {
     if (!user || !profile) return;
     connectSocket(user.id).then((socket) => {
+      if (!socket) {
+        toast.error("Could not connect. Please try again.");
+        return;
+      }
+      registerMatchListeners(socket);
+      isQueuedRef.current = true;
       socket.emit("joinQueue", {
         userId: user.id,
         level: profile.englishLevel ?? "",
         interests: profile.interests,
       });
-    }).catch(() => {});
-    setState("SEARCHING");
-    setSearchTimer(0);
-    toast.success("Searching for a partner...");
+      setState("SEARCHING");
+      setSearchTimer(0);
+      toast.success("Searching for a partner...");
+    }).catch(() => {
+      toast.error("Connection failed. Please try again.");
+    });
   }
 
   function handleLeaveQueue() {
@@ -328,8 +344,23 @@ export default function MatchPage() {
   handleEndCallRef.current = handleEndCall;
 
   async function handleRating(positive: boolean) {
-    const id = sessionIdRef.current || roomId;
-    if (!user || !partnerUserId || !id) {
+    let sessionId = sessionIdRef.current;
+
+    if (!sessionId) {
+      try {
+        const { get } = await import("@/lib/api/client");
+        const sessions = await get<{ sessions: Array<{ id: string }> }>(
+          `/api/sessions?user1Id=${user?.id}&user2Id=${partnerUserId}`
+        );
+        if (sessions?.sessions?.length > 0) {
+          sessionId = sessions.sessions[0].id;
+          sessionIdRef.current = sessionId;
+        }
+      } catch {
+      }
+    }
+
+    if (!user || !partnerUserId || !sessionId) {
       toast.success("Thanks for your feedback!");
       setTimeout(() => reset(), 1500);
       return;
@@ -337,8 +368,9 @@ export default function MatchPage() {
 
     try {
       const { patch } = await import("@/lib/api/client");
-      await patch(`/api/sessions/${id}/rate`, { positive });
+      await patch(`/api/sessions/${sessionId}/rate`, { positive });
     } catch {
+      toast.error("Could not save rating");
     }
 
     toast.success("Thanks for your feedback!");

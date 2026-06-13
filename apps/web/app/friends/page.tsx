@@ -42,20 +42,23 @@ export default function FriendsPage() {
 
   useEffect(() => {
     if (!user) return;
-    connectSocket(user.id).catch(() => {});
+    connectSocket(user.id).then((s) => {
+      if (!s) { toast.error("Failed to connect to server"); return; }
+      const refresh = () => { fetchFriends(); fetchRequests(); };
+      s.off("friend:request");
+      s.off("friend:accepted");
+      s.off("user:online");
+      s.off("user:offline");
+      s.off("disconnect");
+      s.on("friend:request", () => { toast("New friend request!"); refresh(); });
+      s.on("friend:accepted", () => { toast("Friend request accepted!"); refresh(); });
+      s.on("user:online", ({ userId }) => setOnlineUsers((p) => new Set(p).add(userId)));
+      s.on("user:offline", ({ userId }) => setOnlineUsers((p) => { const n = new Set(p); n.delete(userId); return n; }));
+      s.on("disconnect", () => setOnlineUsers(new Set()));
+      (s as any).on("reconnect", () => setOnlineUsers(new Set()));
+    }).catch(() => {});
     fetchFriends();
     fetchRequests();
-    const socket = getSocket();
-    const refresh = () => { fetchFriends(); fetchRequests(); };
-    const onFriendRequest = () => { toast("New friend request!"); refresh(); };
-    const onFriendAccepted = () => { toast("Friend request accepted!"); refresh(); };
-    const onUserOnline = ({ userId }: { userId: string }) => setOnlineUsers((p) => new Set(p).add(userId));
-    const onUserOffline = ({ userId }: { userId: string }) => setOnlineUsers((p) => { const n = new Set(p); n.delete(userId); return n; });
-    socket.on("friend:request", onFriendRequest);
-    socket.on("friend:accepted", onFriendAccepted);
-    socket.on("user:online", onUserOnline);
-    socket.on("user:offline", onUserOffline);
-    return () => { socket.off("friend:request", onFriendRequest); socket.off("friend:accepted", onFriendAccepted); socket.off("user:online", onUserOnline); socket.off("user:offline", onUserOffline); };
   }, [user?.id]);
 
   async function fetchFriends() {
@@ -123,7 +126,7 @@ export default function FriendsPage() {
                   </div>
                   <div className="flex gap-2 mt-auto">
                     <Button size="sm" variant="outline" className="flex-1" onClick={() => router.push(`/chat?userId=${f.friendId}`)}>Message</Button>
-                    <Button size="sm" variant="default" className="flex-1" onClick={() => { const roomId = `call_${[user?.id, f.friendId].sort().join("_")}`; emitFriendCall({ friendId: f.friendId, roomId, callerName: profile?.name || "Unknown" }); toast.success("Calling..."); }}>Call</Button>
+                    <Button size="sm" variant="default" className="flex-1" onClick={() => { if (!onlineUsers.has(f.friendId)) { toast.error("Friend is offline"); return; } const roomId = `call_${[user?.id, f.friendId].sort().join("_")}`; emitFriendCall({ friendId: f.friendId, roomId, callerName: profile?.name || profile?.username || "Someone" }); toast.success("Calling..."); }}>Call</Button>
                     <Button size="sm" variant="danger" className="flex-1" onClick={() => { if (confirm("Remove this friend?")) { handleRemoveFriend(f.friendId); } }}>Remove</Button>
                   </div>
                 </Card>

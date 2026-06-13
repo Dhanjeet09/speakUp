@@ -1,4 +1,5 @@
-import { getIO, setUserInCall } from "../lib/socket";
+import crypto from "crypto";
+import { getIO, setUserInCall, callPartnerMap, areUsersBlocked } from "../lib/socket";
 import { prisma } from "../lib/db";
 import { logDebug, logInfo, logWarn, logError } from "../lib/logger";
 import { getTodaysTopic as getSharedTopic, DAILY_TOPICS } from "@speakup/config";
@@ -72,27 +73,7 @@ function removeStaleEntries(): void {
   }
 }
 
-async function fetchBlockedIds(userId: string): Promise<string[]> {
-  try {
-    const blocks = await prisma.block.findMany({
-      where: { blockerId: userId },
-      select: { blockedId: true },
-    });
-    return blocks.map((b) => b.blockedId);
-  } catch {
-    return [];
-  }
-}
-
-async function areUsersBlocked(userAId: string, userBId: string): Promise<boolean> {
-  const [aBlocks, bBlocks] = await Promise.all([
-    fetchBlockedIds(userAId),
-    fetchBlockedIds(userBId),
-  ]);
-  return aBlocks.includes(userBId) || bBlocks.includes(userAId);
-}
-
-function getSharedInterests(userA: QueueUser, userB: QueueUser): string[] {
+export function getSharedInterests(userA: QueueUser, userB: QueueUser): string[] {
   const interestsB = new Set(userB.interests);
   return userA.interests.filter((i) => interestsB.has(i));
 }
@@ -105,8 +86,6 @@ function getAdjacentLevels(level: string): string[] {
   if (idx < LEVELS.length - 1) adj.push(LEVELS[idx + 1]);
   return adj;
 }
-
-let matchCounter = 0;
 
 async function getUserProfile(userId: string): Promise<{ name: string; country: string; username: string }> {
   try {
@@ -133,7 +112,7 @@ async function createMatch(userA: QueueUser, userB: QueueUser): Promise<void> {
     return;
   }
 
-  const roomId = `room_${++matchCounter}_${Date.now()}`;
+  const roomId = `room_${crypto.randomUUID()}`;
   const topic = getSharedTopic(DAILY_TOPICS);
 
   await removeFromQueue(userA.userId);
@@ -141,6 +120,8 @@ async function createMatch(userA: QueueUser, userB: QueueUser): Promise<void> {
 
   setUserInCall(userA.userId, true);
   setUserInCall(userB.userId, true);
+  callPartnerMap.set(userA.userId, userB.userId);
+  callPartnerMap.set(userB.userId, userA.userId);
 
   const [profileA, profileB] = await Promise.all([
     getUserProfile(userA.userId),
@@ -180,7 +161,7 @@ async function createMatch(userA: QueueUser, userB: QueueUser): Promise<void> {
   });
 }
 
-async function tryMatchOnce(): Promise<boolean> {
+export async function tryMatchOnce(matchedThisTick: Set<string>): Promise<boolean> {
   for (const level of LEVELS) {
     const queue = getQueue(level);
     if (queue.length < 2) continue;
@@ -190,6 +171,7 @@ async function tryMatchOnce(): Promise<boolean> {
         const userA = queue[i];
         const userB = queue[j];
 
+        if (matchedThisTick.has(userA.userId) || matchedThisTick.has(userB.userId)) continue;
         if (await areUsersBlocked(userA.userId, userB.userId)) continue;
 
         const waitTimeA = Date.now() - userA.joinedAt;
@@ -197,6 +179,8 @@ async function tryMatchOnce(): Promise<boolean> {
 
         if (sharedInterests.length > 0 || waitTimeA > INTEREST_MATCH_TIMEOUT_MS) {
           await createMatch(userA, userB);
+          matchedThisTick.add(userA.userId);
+          matchedThisTick.add(userB.userId);
           return true;
         }
       }
@@ -205,11 +189,12 @@ async function tryMatchOnce(): Promise<boolean> {
   return false;
 }
 
-async function tryAdjacentLevelMatch(): Promise<boolean> {
+export async function tryAdjacentLevelMatch(matchedThisTick: Set<string>): Promise<boolean> {
   for (const level of LEVELS) {
     const queue = getQueue(level);
 
     for (const userA of queue) {
+      if (matchedThisTick.has(userA.userId)) continue;
       const waitTime = Date.now() - userA.joinedAt;
       if (waitTime < LEVEL_EXPAND_TIMEOUT_MS) continue;
 
@@ -217,9 +202,12 @@ async function tryAdjacentLevelMatch(): Promise<boolean> {
         const adjQueue = getQueue(adjLevel);
         for (const userB of adjQueue) {
           if (userA.userId === userB.userId) continue;
+          if (matchedThisTick.has(userB.userId)) continue;
           if (await areUsersBlocked(userA.userId, userB.userId)) continue;
 
           await createMatch(userA, userB);
+          matchedThisTick.add(userA.userId);
+          matchedThisTick.add(userB.userId);
           return true;
         }
       }
@@ -252,23 +240,52 @@ export function resetQueues(): void {
   userMap.clear();
 }
 
+export let matchmakingIntervalRef: ReturnType<typeof setInterval>;
+
+export function resetPendingMatches(): void {
+  pendingMatches.clear();
+}
+
+export function resetUserMap(): void {
+  userMap.clear();
+}
+
+
 export function initMatchmaking(): void {
-  setInterval(async () => {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [userId, match] of pendingMatches) {
+      if (now - match.timestamp > PENDING_MATCH_TTL) {
+        pendingMatches.delete(userId);
+        setUserInCall(userId, false);
+        for (const [partnerId, partner] of pendingMatches) {
+          if (partner.partnerUserId === userId) {
+            pendingMatches.delete(partnerId);
+            setUserInCall(partnerId, false);
+            break;
+          }
+        }
+      }
+    }
+  }, 30000);
+
+  matchmakingIntervalRef = setInterval(async () => {
     try {
       removeStaleEntries();
 
       let matched = true;
       let iterations = 0;
       const MAX_ITERATIONS = 50;
+      const matchedThisTick = new Set<string>();
 
       while (matched && iterations < MAX_ITERATIONS) {
         matched = false;
-        const found = await tryMatchOnce();
+        const found = await tryMatchOnce(matchedThisTick);
         if (found) {
           matched = true;
           iterations++;
         } else {
-          const adjFound = await tryAdjacentLevelMatch();
+          const adjFound = await tryAdjacentLevelMatch(matchedThisTick);
           if (adjFound) {
             matched = true;
             iterations++;

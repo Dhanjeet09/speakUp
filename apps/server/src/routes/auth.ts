@@ -6,7 +6,7 @@ import { validateZod } from "../middleware/validateZod";
 import { AppError, asyncHandler } from "../middleware/errorHandler";
 import { createAnonSupabaseClient, createSupabaseClient } from "../lib/supabase";
 import { registerSchema, loginSchema, forgotPasswordSchema } from "../schemas";
-import { logInfo, logWarn } from "../lib/logger";
+import { logInfo, logDebug, logWarn } from "../lib/logger";
 import type { AuthenticatedRequest } from "../types";
 
 const router = Router();
@@ -122,7 +122,8 @@ router.post(
     const supabase = createAnonSupabaseClient();
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      throw new AppError(error.message, 401);
+      logWarn("Auth", "Login failed", { error: error.message });
+      throw new AppError("Invalid email or password", 401);
     }
     res.json({ success: true, data: { session: data.session, user: data.user } });
   })
@@ -138,7 +139,7 @@ router.post(
         const supabase = createSupabaseClient();
         await supabase.auth.admin.signOut(token);
       } catch {
-        logWarn("Auth", "Server-side token revocation failed (token may already be invalid)");
+        logDebug("Auth", "Server-side token revocation skipped (token may already be invalid)");
       }
     }
     res.json({ success: true });

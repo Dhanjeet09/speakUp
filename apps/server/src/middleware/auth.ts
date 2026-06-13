@@ -1,8 +1,12 @@
 import { Response, NextFunction } from "express";
-import { createAnonSupabaseClient } from "../lib/supabase";
+import jwt from "jsonwebtoken";
+import { env } from "../lib/env";
 import { prisma } from "../lib/db";
+import { createAnonSupabaseClient } from "../lib/supabase";
 import { logDebug, logWarn, logError as logErr } from "../lib/logger";
 import type { AuthenticatedRequest } from "../types";
+
+const JWT_SECRET = env.SUPABASE_JWT_SECRET;
 
 function extractToken(req: AuthenticatedRequest): string | null {
   const authHeader = req.headers.authorization;
@@ -42,30 +46,62 @@ export async function requireAuth(
       return;
     }
 
-    const supabase = createAnonSupabaseClient();
-    const { data, error } = await supabase.auth.getUser(token);
-
-    if (error || !data.user) {
-      logWarn("Auth", "Invalid or expired token", { error: String(error) });
+    let userId: string | undefined;
+    if (JWT_SECRET) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] }) as jwt.JwtPayload;
+        if (!decoded.aud || decoded.aud !== "authenticated") {
+          logWarn("Auth", "Invalid token audience", { aud: decoded.aud });
+          res.status(401).json({ success: false, error: "Invalid or expired token" });
+          return;
+        }
+        userId = decoded.sub;
+      } catch {
+        logWarn("Auth", "Invalid or expired token");
+        res.status(401).json({ success: false, error: "Invalid or expired token" });
+        return;
+      }
+    } else {
+      try {
+        const supabase = createAnonSupabaseClient();
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+        if (error || !user) {
+          logWarn("Auth", "Invalid token via Supabase API");
+          res.status(401).json({ success: false, error: "Invalid or expired token" });
+          return;
+        }
+        userId = user.id;
+      } catch {
+        logWarn("Auth", "Supabase getUser exception");
+        res.status(401).json({ success: false, error: "Invalid or expired token" });
+        return;
+      }
+    }
+    if (!userId) {
       res.status(401).json({ success: false, error: "Invalid or expired token" });
       return;
     }
 
-    req.userId = data.user.id;
-    req.userEmail = data.user.email;
+    req.userId = userId;
 
     const userRecord = await prisma.user.findUnique({
-      where: { id: data.user.id },
-      select: { isSuspended: true, role: true },
+      where: { id: userId },
+      select: { isSuspended: true, role: true, email: true },
     });
 
-    if (userRecord?.isSuspended) {
+    if (!userRecord) {
+      res.status(401).json({ success: false, error: "User not found" });
+      return;
+    }
+
+    if (userRecord.isSuspended) {
       res.status(403).json({ success: false, error: "Account suspended. Please contact support." });
       return;
     }
 
-    req.userRole = userRecord?.role || "learner";
-    logDebug("Auth", "User authenticated", { userId: data.user.id });
+    req.userEmail = userRecord.email;
+    req.userRole = userRecord.role || "learner";
+    logDebug("Auth", "User authenticated", { userId });
     next();
   } catch (err) {
     logErr("Auth", "Auth verification exception", { error: String(err) });
@@ -98,7 +134,7 @@ export async function requireAdmin(
       return;
     }
 
-    if (req.userRole !== "admin") {
+    if (req.userRole !== "admin" && !env.ADMIN_USER_IDS.includes(req.userId)) {
       res.status(403).json({ success: false, error: "Admin access required" });
       return;
     }

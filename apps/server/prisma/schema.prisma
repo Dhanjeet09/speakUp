@@ -11,7 +11,7 @@ datasource db {
 enum FriendshipStatus {
   pending
   accepted
-  blocked
+  rejected
 }
 
 enum EnglishLevel {
@@ -37,7 +37,7 @@ enum UserRole {
 }
 
 model User {
-  id             String       @id @default(cuid())
+  id             String       @id
   email          String       @unique
   role           UserRole     @default(learner)
   name           String?
@@ -72,6 +72,7 @@ model User {
   @@index([email])
   @@index([englishLevel])
   @@index([username])
+  @@index([totalSessions])
 }
 
 model Session {
@@ -106,6 +107,8 @@ model ChatMessage {
 
   @@index([senderId])
   @@index([receiverId])
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
   @@index([senderId, receiverId, createdAt])
 }
 

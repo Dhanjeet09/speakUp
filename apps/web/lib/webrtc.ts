@@ -13,9 +13,20 @@ const ICE_SERVERS = {
       { urls: "stun:stun2.l.google.com:19302" },
       { urls: "stun:stun3.l.google.com:19302" },
       { urls: "stun:stun4.l.google.com:19302" },
+      { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+      { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
     ],
   },
 };
+
+let turnWarningShown = false;
+if (typeof window !== "undefined" && !turnWarningShown) {
+  turnWarningShown = true;
+  console.warn(
+    "[webrtc] Free TURN servers are provided for development only. " +
+    "For production, use a properly provisioned TURN server (e.g., Twilio, Metered, or self-hosted coturn)."
+  );
+}
 
 export type PeerErrorType =
   | "network"
@@ -48,6 +59,12 @@ export function destroyPeer(): void {
   }
 }
 
+let videoEnabled = true;
+
+export function isVideoActive(): boolean {
+  return videoEnabled;
+}
+
 export async function startLocalStream(): Promise<MediaStream> {
   if (localStream) return localStream;
 
@@ -55,10 +72,27 @@ export async function startLocalStream(): Promise<MediaStream> {
     throw new Error("browser-incompatible");
   }
 
-  localStream = await navigator.mediaDevices.getUserMedia({
-    video: true,
-    audio: true,
-  });
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    });
+    videoEnabled = true;
+  } catch (err) {
+    if (
+      err instanceof DOMException &&
+      (err.name === "NotAllowedError" || err.name === "NotFoundError")
+    ) {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: true,
+      });
+      videoEnabled = false;
+    } else {
+      throw err;
+    }
+  }
+
   return localStream;
 }
 
@@ -142,6 +176,9 @@ export function endCall(): void {
     currentCall.close();
     currentCall = null;
   }
+}
+
+export function releaseLocalStream(): void {
   if (localStream) {
     localStream.getTracks().forEach((t) => t.stop());
     localStream = null;

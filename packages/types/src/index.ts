@@ -90,7 +90,6 @@ export interface QueueUser {
   userId: string;
   level: string;
   interests: string[];
-  blockedUserIds: string[];
   joinedAt: number;
 }
 
@@ -122,7 +121,7 @@ export interface MatchRejectPayload {
 }
 
 // ── Friends ──
-export type FriendshipStatus = "pending" | "accepted" | "blocked";
+export type FriendshipStatus = "pending" | "accepted" | "rejected";
 
 export interface FriendData {
   id: string;
@@ -197,7 +196,8 @@ export interface ServerToClientEvents {
   "friend:request": (payload: FriendRequestPayload) => void;
   "friend:accepted": (payload: { friendId: string }) => void;
   "friend:calling": (payload: { callerId: string; callerName: string; roomId: string }) => void;
-  "friend:call-answer": (payload: { callerId: string; accepted: boolean }) => void;
+  "call:busy": (payload: { message: string }) => void;
+  "friend:call-answer": (payload: { callerId: string; accepted: boolean; roomId?: string; answererId?: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -214,8 +214,8 @@ export interface ClientToServerEvents {
   "typing:stop": (data: { receiverId: string }) => void;
   "match:accept": (data: { userId: string }) => void;
   "match:reject": (data: { userId: string }) => void;
-  "friend:call": (data: { friendId: string; roomId: string; callerName: string }) => void;
-  "friend:call-answer": (data: { callerId: string; accepted: boolean }) => void;
+  "friend:call": (data: { friendId: string; roomId: string; callerName?: string }) => void;
+  "friend:call-answer": (data: { callerId: string; accepted: boolean; roomId: string; answererId?: string }) => void;
 }
 
 // ── API Response ──

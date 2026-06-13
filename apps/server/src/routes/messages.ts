@@ -18,18 +18,25 @@ router.get(
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const userId = req.userId!;
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
-    const offset = Math.max(Number(req.query.offset) || 0, 0);
 
-    logInfo("Messages", "Fetching conversations", { userId, limit, offset });
+    logInfo("Messages", "Fetching conversations", { userId, limit });
 
-    const messages = await prisma.chatMessage.findMany({
-      where: {
-        OR: [{ senderId: userId }, { receiverId: userId }],
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-      skip: offset,
-    });
+    const [sentMessages, receivedMessages] = await Promise.all([
+      prisma.chatMessage.findMany({
+        where: { senderId: userId },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      }),
+      prisma.chatMessage.findMany({
+        where: { receiverId: userId },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      }),
+    ]);
+
+    const allMessages = [...sentMessages, ...receivedMessages];
+    allMessages.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const messages = allMessages.slice(0, limit);
 
     logInfo("Messages", `Found ${messages.length} messages for user`, { userId });
 
@@ -213,6 +220,17 @@ router.post(
       throw new AppError("Cannot send message to this user", 403);
     }
 
+    const friendship = await prisma.friendship.findFirst({
+      where: {
+        status: "accepted",
+        OR: [
+          { requesterId: userId, addresseeId: receiverId },
+          { requesterId: receiverId, addresseeId: userId },
+        ],
+      },
+    });
+    if (!friendship) throw new AppError("Can only send messages to friends", 403);
+
     const sanitized = sanitizeHtml(content, { allowedTags: [], allowedAttributes: {} });
 
     const message = await prisma.chatMessage.create({
@@ -242,18 +260,14 @@ router.post(
     };
 
     const receiverSockets = await io.in(receiverId).fetchSockets();
-    const senderSockets = await io.in(userId).fetchSockets();
     logInfo("Messages", "Emitting message:received via socket", {
       event: "message:received",
       toReceiver: receiverId,
-      toSender: userId,
       messageId: message.id,
       receiverRoomSize: receiverSockets.length,
-      senderRoomSize: senderSockets.length,
     });
 
     io.to(receiverId).emit("message:received", payload);
-    io.to(userId).emit("message:received", payload);
 
     res.status(201).json({ success: true, data: { message } });
   })

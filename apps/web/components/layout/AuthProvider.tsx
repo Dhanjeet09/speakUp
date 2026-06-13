@@ -13,6 +13,8 @@ export default function AuthProvider({
 }) {
   const { setUser, setProfile, setLoading } = useAuthStore();
   const fetchingRef = useRef(false);
+  const fetchedRef = useRef(false);
+  const lastFetchRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,7 +26,9 @@ export default function AuthProvider({
       setUser(session?.user ?? null);
 
       if (session?.user) {
-        await fetchProfile();
+        if (!fetchedRef.current) {
+          await fetchProfile();
+        }
       }
       if (!cancelled) setLoading(false);
     };
@@ -37,7 +41,13 @@ export default function AuthProvider({
       if (cancelled) return;
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile();
+        if (_event === "INITIAL_SESSION") {
+          if (!fetchedRef.current) {
+            fetchProfile();
+          }
+        } else {
+          fetchProfile();
+        }
       } else {
         setProfile(null);
       }
@@ -61,6 +71,9 @@ export default function AuthProvider({
 
   async function fetchProfile() {
     if (fetchingRef.current) return;
+    const now = Date.now();
+    if (now - lastFetchRef.current < 2000) return;
+    lastFetchRef.current = now;
     fetchingRef.current = true;
     try {
       const res = await get<{
@@ -89,6 +102,7 @@ export default function AuthProvider({
     } catch {
     } finally {
       fetchingRef.current = false;
+      fetchedRef.current = true;
     }
   }
 

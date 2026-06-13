@@ -26,6 +26,26 @@ router.post(
       throw new AppError("You can only create sessions you participate in", 403);
     }
 
+    if (durationSeconds < 5) {
+      throw new AppError("Session too short to record", 400);
+    }
+
+    if (user1Id === user2Id) throw new AppError("Cannot create a session with yourself", 400);
+
+    if (user1Id !== user2Id) {
+      const [block1, block2] = await Promise.all([
+        prisma.block.findUnique({
+          where: { blockerId_blockedId: { blockerId: user1Id, blockedId: user2Id } },
+        }),
+        prisma.block.findUnique({
+          where: { blockerId_blockedId: { blockerId: user2Id, blockedId: user1Id } },
+        }),
+      ]);
+      if (block1 || block2) {
+        throw new AppError("Cannot create session with this user", 403);
+      }
+    }
+
     const minutes = Math.floor(durationSeconds / 60);
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -39,24 +59,22 @@ router.post(
         },
       });
 
-      await Promise.all([
-        tx.user.update({
-          where: { id: user1Id },
-          data: {
-            totalMinutes: { increment: minutes },
-            totalSessions: { increment: 1 },
-          },
-        }),
-        tx.user.update({
-          where: { id: user2Id },
-          data: {
-            totalMinutes: { increment: minutes },
-            totalSessions: { increment: 1 },
-          },
-        }),
-        updateStreak(user1Id, tx),
-        updateStreak(user2Id, tx),
-      ]);
+      await tx.user.update({
+        where: { id: user1Id },
+        data: {
+          totalMinutes: { increment: minutes },
+          totalSessions: { increment: 1 },
+        },
+      });
+      await tx.user.update({
+        where: { id: user2Id },
+        data: {
+          totalMinutes: { increment: minutes },
+          totalSessions: { increment: 1 },
+        },
+      });
+      await updateStreak(user1Id, tx);
+      await updateStreak(user2Id, tx);
 
       return session;
     });
@@ -77,23 +95,56 @@ router.get(
       throw new AppError("You can only view your own sessions", 403);
     }
 
-    const where = {
-      OR: [{ user1Id: userId }, { user2Id: userId }],
-    };
+    const take = Math.min(Number(req.query.limit) || 20, 100);
+    const skip = Math.max(Number(req.query.offset) || 0, 0);
 
-    const [sessions, total] = await Promise.all([
+    const fetchTake = take + skip;
+    const [asUser1, asUser2, count1, count2] = await Promise.all([
       prisma.session.findMany({
-        where,
-        include: {
+        where: { user1Id: userId },
+        select: {
+          id: true,
+          createdAt: true,
+          durationSeconds: true,
+          user1Id: true,
+          user2Id: true,
+          topicUsed: true,
+          user1Rating: true,
+          user2Rating: true,
+          roomUrl: true,
           user1: { select: { id: true, name: true, country: true } },
           user2: { select: { id: true, name: true, country: true } },
         },
         orderBy: { createdAt: "desc" },
-        take: Math.min(Number(req.query.limit) || 20, 100),
-        skip: Math.max(Number(req.query.offset) || 0, 0),
+        take: fetchTake,
       }),
-      prisma.session.count({ where }),
+      prisma.session.findMany({
+        where: { user2Id: userId },
+        select: {
+          id: true,
+          createdAt: true,
+          durationSeconds: true,
+          user1Id: true,
+          user2Id: true,
+          topicUsed: true,
+          user1Rating: true,
+          user2Rating: true,
+          roomUrl: true,
+          user1: { select: { id: true, name: true, country: true } },
+          user2: { select: { id: true, name: true, country: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: fetchTake,
+      }),
+      prisma.session.count({ where: { user1Id: userId } }),
+      prisma.session.count({ where: { user2Id: userId } }),
     ]);
+
+    const all = [...asUser1, ...asUser2].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+    );
+    const sessions = all.slice(skip, skip + take);
+    const total = count1 + count2;
 
     res.json({ success: true, data: { sessions, total } });
   })
@@ -106,27 +157,47 @@ router.get(
   asyncHandler(async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { userId } = req.params;
 
-    const sessions = await prisma.session.findMany({
-      where: {
-        OR: [
-          { user1Id: userId, user1Rating: { not: null } },
-          { user2Id: userId, user2Rating: { not: null } },
-        ],
-      },
-      select: {
-        id: true,
-        user1Id: true,
-        user2Id: true,
-        user1Rating: true,
-        user2Rating: true,
-        createdAt: true,
-        user1: { select: { id: true, name: true } },
-        user2: { select: { id: true, name: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: Math.min(Number(req.query.limit) || 50, 100),
-      skip: Math.max(Number(req.query.offset) || 0, 0),
-    });
+    const take = Math.min(Number(req.query.limit) || 50, 100);
+    const skip = Math.max(Number(req.query.offset) || 0, 0);
+
+    const [ratingsAsUser1, ratingsAsUser2] = await Promise.all([
+      prisma.session.findMany({
+        where: { user1Id: userId, user1Rating: { not: null } },
+        select: {
+          id: true,
+          user1Id: true,
+          user2Id: true,
+          user1Rating: true,
+          user2Rating: true,
+          createdAt: true,
+          user1: { select: { id: true, name: true } },
+          user2: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take,
+        skip,
+      }),
+      prisma.session.findMany({
+        where: { user2Id: userId, user2Rating: { not: null } },
+        select: {
+          id: true,
+          user1Id: true,
+          user2Id: true,
+          user1Rating: true,
+          user2Rating: true,
+          createdAt: true,
+          user1: { select: { id: true, name: true } },
+          user2: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take,
+        skip,
+      }),
+    ]);
+
+    const sessions = [...ratingsAsUser1, ...ratingsAsUser2].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+    );
 
     let positiveCount = 0;
     let totalCount = 0;

@@ -10,9 +10,10 @@ import * as Sentry from "@sentry/node";
 import sanitizeHtml from "sanitize-html";
 
 import { ExpressPeerServer } from "peer";
+import { WebSocketServer } from "ws";
 
-import { env } from "./lib/env";
-import { initSocket, getOnlineUsers, checkRateLimit, isUserInCall, setUserInCall, checkJoinQueueRate, addUserConnection, removeUserConnection } from "./lib/socket";
+import { env, parseCorsOrigins } from "./lib/env";
+import { initSocket, getOnlineUsers, checkRateLimit, isUserInCall, setUserInCall, checkJoinQueueRate, addUserConnection, removeUserConnection, areUsersBlocked, isUserSuspended, setCallPair, getCallPartner, clearCallPair, checkUserRateLimit } from "./lib/socket";
 import { disconnectPrisma, initDb, prisma } from "./lib/db";
 import { errorHandler } from "./middleware/errorHandler";
 import { requestLogger } from "./middleware/requestLogger";
@@ -29,6 +30,7 @@ import {
   removeFromQueue,
   getQueueSize,
   initMatchmaking,
+  matchmakingIntervalRef,
   getPendingMatch,
   removePendingMatch,
 } from "./services/matchmaking";
@@ -44,7 +46,7 @@ if (env.SENTRY_DSN) {
 const app = express();
 const httpServer = createServer(app);
 
-const CORS_ORIGIN = env.CORS_ORIGIN.split(",").map((s) => s.trim());
+const CORS_ORIGIN = parseCorsOrigins();
 
 initDb().catch(() => {});
 
@@ -81,15 +83,13 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-app.use(
-  rateLimit({
+app.use("/api", rateLimit({
     windowMs: 60 * 1000,
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { success: false, error: "Too many requests, please try again later" },
-  })
-);
+    message: { success: false, error: "Too many requests, please try again later." },
+  }));
 app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
 app.use(requestLogger);
@@ -119,14 +119,51 @@ app.use(errorHandler);
 const io = initSocket(httpServer);
 const PORT = env.PORT;
 
-app.use("/peerjs", ExpressPeerServer(httpServer, { path: "/peerjs" }));
+// Fix peer@1.0.2 path bug: internal code appends "peerjs" to the configured path,
+// turning "/peerjs" into "/peerjs/peerjs". The WebSocketServer then rejects all
+// upgrades that don't match "/peerjs/peerjs". For Socket.IO connections, ws's
+// abortHandshake() sends raw HTTP 400 to an already-upgraded WebSocket, causing
+// "Invalid frame header" errors.
+//
+// Fix: use a noServer WebSocketServer and manually route upgrades.
+const peerWSS = new WebSocketServer({ noServer: true });
+const peerApp = ExpressPeerServer(httpServer, {
+  path: "/",
+  createWebSocketServer: () => peerWSS,
+});
+app.use(peerApp);
+
+// Route WebSocket upgrades manually. Engine.io registers its handler first
+// (in initSocket), so for /socket.io/ paths it runs first and upgrades the
+// socket. Our handler returns early for those paths, preventing PeerJS's
+// WebSocketServer from calling abortHandshake() on the upgraded connection.
+httpServer.on("upgrade", (req, socket, head) => {
+  const pathname = req.url ?? "";
+
+  if (pathname.startsWith("/socket.io/")) {
+    return; // Engine.io has already handled (or will handle) this upgrade
+  }
+
+  if (pathname.startsWith("/peerjs")) {
+    peerWSS.handleUpgrade(req, socket, head, (ws) => {
+      peerWSS.emit("connection", ws, req);
+    });
+    return;
+  }
+
+  socket.destroy();
+});
 
 io.on("connection", (socket) => {
   const userId = socket.data.userId as string | undefined;
 
   if (userId) {
+    if (!addUserConnection(userId)) {
+      socket.emit("error", { message: "Too many connections" });
+      socket.disconnect(true);
+      return;
+    }
     socket.join(userId);
-    addUserConnection(userId);
     logInfo("Socket", "User connected and joined room", {
       userId,
       socketId: socket.id,
@@ -134,19 +171,32 @@ io.on("connection", (socket) => {
     });
     socket.broadcast.emit("user:online", { userId });
   } else {
+    const safeAuth = { ...socket.handshake.auth };
+    if (safeAuth.token) safeAuth.token = "[REDACTED]";
     logDebug("Socket", "Anonymous connection (no userId in auth)", {
       socketId: socket.id,
-      auth: JSON.stringify(socket.handshake.auth),
+      auth: JSON.stringify(safeAuth),
     });
   }
 
   const count = getOnlineUsers(io).size;
   io.emit("onlineCount", { count });
 
-  function wrapRateLimited<T extends (...args: unknown[]) => void>(fn: T): T {
-    return ((...args: unknown[]) => {
+  function wrapRateLimited<T extends (...args: any[]) => unknown>(fn: T): T {
+    return ((...args: any[]) => {
       if (checkRateLimit(socket.id)) {
-        fn(...args);
+        try {
+          const result = fn(...args);
+          if (result instanceof Promise) {
+            result.catch((err) => {
+              logError("Socket", "Unhandled handler error", { error: String(err) });
+            });
+          }
+        } catch (err) {
+          logError("Socket", "Handler sync error", { error: String(err) });
+        }
+      } else {
+        socket.emit("error", { message: "Too many requests. Please slow down." });
       }
     }) as T;
   }
@@ -169,12 +219,21 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Please wait before searching again" });
       return;
     }
+    const VALID_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"];
+    if (!VALID_LEVELS.includes(data.level)) {
+      socket.emit("error", { message: "Invalid English level" });
+      return;
+    }
     logInfo("Queue", `User joining queue`, { userId, level: data.level, interests: data.interests });
     try {
+      const MAX_INTERESTS = 20;
+      const interests = Array.isArray(data.interests)
+        ? data.interests.filter(i => typeof i === "string").slice(0, MAX_INTERESTS)
+        : [];
       await addToQueue({
         userId,
         level: data.level,
-        interests: data.interests || [],
+        interests,
         joinedAt: Date.now(),
       });
 
@@ -194,50 +253,57 @@ io.on("connection", (socket) => {
 
   socket.on("leaveQueue", wrapRateLimited(async () => {
     if (!userId) return;
-    logInfo("Queue", `User leaving queue`, { userId });
-    if (queueInterval) {
-      clearInterval(queueInterval);
-      queueInterval = null;
+    try {
+      if (queueInterval) {
+        clearInterval(queueInterval);
+        queueInterval = null;
+      }
+      await removeFromQueue(userId);
+    } catch (err) {
+      logError("Queue", "Failed to leave queue", { userId, error: String(err) });
     }
-    await removeFromQueue(userId);
   }));
 
   socket.on("callEnded", wrapRateLimited(({ roomId, partnerUserId }) => {
     if (!userId) return;
-    logInfo("Call", `Call ended`, { userId, roomId, partnerUserId });
     setUserInCall(userId, false);
-    if (partnerUserId) {
+    if (partnerUserId && getCallPartner(userId) === partnerUserId) {
       setUserInCall(partnerUserId, false);
       socket.to(partnerUserId).emit("partnerLeft");
-    } else if (roomId) {
-      socket.to(roomId).emit("partnerLeft");
     }
+    clearCallPair(userId);
   }));
 
   socket.on("message:send", wrapRateLimited(async (data) => {
     if (!userId) return;
-    if (!data.receiverId || !data.content || typeof data.content !== "string") return;
+    if (!data.receiverId || typeof data.receiverId !== "string" || !data.content || typeof data.content !== "string") return;
 
-    const userRecord = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { isSuspended: true },
-    });
-    if (userRecord?.isSuspended) {
+    if (!checkUserRateLimit(userId)) {
+      socket.emit("error", { message: "Too many requests. Please slow down." });
+      return;
+    }
+
+    if (await isUserSuspended(userId)) {
       socket.emit("error", { message: "Account suspended" });
       return;
     }
 
-    const [blockedBySender, blockedByReceiver] = await Promise.all([
-      prisma.block.findUnique({
-        where: { blockerId_blockedId: { blockerId: userId, blockedId: data.receiverId } },
-      }),
-      prisma.block.findUnique({
-        where: { blockerId_blockedId: { blockerId: data.receiverId, blockedId: userId } },
-      }),
-    ]);
-
-    if (blockedBySender || blockedByReceiver) {
+    if (await areUsersBlocked(userId, data.receiverId)) {
       socket.emit("error", { message: "Cannot send message to this user" });
+      return;
+    }
+
+    const friendship = await prisma.friendship.findFirst({
+      where: {
+        status: "accepted",
+        OR: [
+          { requesterId: userId, addresseeId: data.receiverId },
+          { requesterId: data.receiverId, addresseeId: userId },
+        ],
+      },
+    });
+    if (!friendship) {
+      socket.emit("error", { message: "Can only send messages to friends" });
       return;
     }
 
@@ -275,16 +341,6 @@ io.on("connection", (socket) => {
         },
       };
 
-      const receiverSockets = await io.in(data.receiverId).fetchSockets();
-      logInfo("Socket", "Emitting message:received", {
-        event: "message:received",
-        toReceiver: data.receiverId,
-        toSender: userId,
-        socketId: socket.id,
-        messageId: message.id,
-        receiverSocketsInRoom: receiverSockets.length,
-      });
-
       socket.to(data.receiverId).emit("message:received", payload);
       socket.emit("message:received", payload);
     } catch (err) {
@@ -293,13 +349,15 @@ io.on("connection", (socket) => {
     }
   }));
 
-  socket.on("typing:start", wrapRateLimited(({ receiverId }) => {
-    if (!userId || !receiverId) return;
+  socket.on("typing:start", wrapRateLimited(async ({ receiverId }) => {
+    if (!userId || !receiverId || typeof receiverId !== "string") return;
+    if (await areUsersBlocked(userId, receiverId)) return;
     socket.to(receiverId).emit("typing:start", { senderId: userId });
   }));
 
-  socket.on("typing:stop", wrapRateLimited(({ receiverId }) => {
-    if (!userId || !receiverId) return;
+  socket.on("typing:stop", wrapRateLimited(async ({ receiverId }) => {
+    if (!userId || !receiverId || typeof receiverId !== "string") return;
+    if (await areUsersBlocked(userId, receiverId)) return;
     socket.to(receiverId).emit("typing:stop", { senderId: userId });
   }));
 
@@ -311,7 +369,14 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "No pending match found" });
       return;
     }
+    const partnerMatch = getPendingMatch(partnerUserId);
+    if (!partnerMatch || partnerMatch.partnerUserId !== userId) {
+      socket.emit("error", { message: "Match no longer available" });
+      return;
+    }
     logInfo("Match", "Match accepted", { userId, partnerUserId });
+    setUserInCall(userId, true);
+    setUserInCall(partnerUserId, true);
     removePendingMatch(userId);
     removePendingMatch(partnerUserId);
     io.to(partnerUserId).emit("match:accepted", { userId });
@@ -332,23 +397,28 @@ io.on("connection", (socket) => {
     io.to(partnerUserId).emit("match:rejected", { userId });
   }));
 
-  socket.on("friend:call", wrapRateLimited(async ({ friendId, roomId, callerName }) => {
-    if (!userId || !friendId || !roomId || !callerName) return;
+  socket.on("friend:call", wrapRateLimited(async ({ friendId, roomId }) => {
+    if (!userId || !friendId || !roomId) return;
 
-    const callerRecord = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { isSuspended: true },
-    });
-    if (callerRecord?.isSuspended) {
-      socket.emit("error", { message: "Account suspended" });
+    if (!checkUserRateLimit(userId)) {
+      socket.emit("error", { message: "Too many requests. Please slow down." });
       return;
     }
 
-    const friendRecord = await prisma.user.findUnique({
-      where: { id: friendId },
-      select: { isSuspended: true },
-    });
-    if (friendRecord?.isSuspended) {
+    if (isUserInCall(userId)) {
+      socket.emit("error", { message: "You are already in a call" });
+      return;
+    }
+
+    const [callerSuspended, friendSuspended] = await Promise.all([
+      isUserSuspended(userId),
+      isUserSuspended(friendId),
+    ]);
+    if (callerSuspended) {
+      socket.emit("error", { message: "Account suspended" });
+      return;
+    }
+    if (friendSuspended) {
       socket.emit("error", { message: "Cannot call a suspended user" });
       return;
     }
@@ -368,14 +438,57 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (await areUsersBlocked(userId, friendId)) {
+      socket.emit("error", { message: "Cannot call this user" });
+      return;
+    }
+
+    if (isUserInCall(friendId)) {
+      socket.emit("error", { message: "User is currently in a call" });
+      return;
+    }
+
+    const callerProfile = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    });
+    const actualCallerName = callerProfile?.name || "Unknown";
+
+    setCallPair(userId, friendId);
     logInfo("Friend", "Friend call initiated", { callerId: userId, friendId, roomId });
-    socket.to(friendId).emit("friend:calling", { callerId: userId, callerName, roomId });
+    socket.to(friendId).emit("friend:calling", { callerId: userId, callerName: actualCallerName, roomId });
   }));
 
-  socket.on("friend:call-answer", wrapRateLimited(({ callerId, accepted }) => {
+  socket.on("friend:call-answer", wrapRateLimited(async ({ callerId, accepted, roomId }) => {
     if (!userId || !callerId) return;
+
+    const friendship = await prisma.friendship.findFirst({
+      where: {
+        status: "accepted",
+        OR: [
+          { requesterId: userId, addresseeId: callerId },
+          { requesterId: callerId, addresseeId: userId },
+        ],
+      },
+    });
+    if (!friendship) {
+      logWarn("Friend", "call-answer: not friends", { userId, callerId });
+      return;
+    }
+
+    const [blockA, blockB] = await Promise.all([
+      prisma.block.findUnique({ where: { blockerId_blockedId: { blockerId: userId, blockedId: callerId } } }),
+      prisma.block.findUnique({ where: { blockerId_blockedId: { blockerId: callerId, blockedId: userId } } }),
+    ]);
+    if (blockA || blockB) return;
+
     logInfo("Friend", "Friend call answer", { answererId: userId, callerId, accepted });
-    socket.to(callerId).emit("friend:call-answer", { callerId: userId, accepted });
+    if (accepted) {
+      setUserInCall(callerId, true);
+      setUserInCall(userId, true);
+      setCallPair(userId, callerId);
+    }
+    socket.to(callerId).emit("friend:call-answer", { callerId, answererId: userId, accepted, roomId });
   }));
 
   socket.on("disconnect", async (reason) => {
@@ -389,7 +502,16 @@ io.on("connection", (socket) => {
       });
       if (remaining === 0) {
         setUserInCall(userId, false);
+        clearCallPair(userId);
         await removeFromQueue(userId);
+        const pending = getPendingMatch(userId);
+        if (pending) {
+          setUserInCall(pending.partnerUserId, false);
+          clearCallPair(pending.partnerUserId);
+          removePendingMatch(userId);
+          removePendingMatch(pending.partnerUserId);
+          io.to(pending.partnerUserId).emit("partnerLeft");
+        }
         socket.broadcast.emit("user:offline", { userId });
       }
     } else {
@@ -414,28 +536,33 @@ const server = httpServer.listen(PORT, () => {
   }
 });
 
-function gracefulShutdown() {
+function gracefulShutdown(fromUncaught = false) {
   logInfo("Shutdown", "Shutting down gracefully...");
+  clearInterval(matchmakingIntervalRef);
+  io.disconnectSockets(true);
   io.close();
-  server.close(async () => {
-    await disconnectPrisma();
-    logInfo("Shutdown", "Server closed");
-    process.exit(0);
+  server.close(() => {
+    logInfo("Shutdown", "HTTP server closed");
+  });
+  disconnectPrisma().then(() => {
+    logInfo("Shutdown", "Prisma disconnected");
+    process.exit(fromUncaught ? 1 : 0);
   });
   setTimeout(() => {
     logError("Shutdown", "Forced shutdown after timeout");
     process.exit(1);
-  }, 10000);
+  }, 30000);
 }
 
 process.on("SIGTERM", gracefulShutdown);
 process.on("SIGINT", gracefulShutdown);
 process.on("uncaughtException", (err) => {
   logError("Process", "Uncaught exception", { error: err.message, stack: err.stack });
-  gracefulShutdown();
+  gracefulShutdown(true);
 });
 process.on("unhandledRejection", (reason) => {
   logError("Process", "Unhandled rejection", { reason: String(reason) });
+  gracefulShutdown(true);
 });
 
 export { app, io };
