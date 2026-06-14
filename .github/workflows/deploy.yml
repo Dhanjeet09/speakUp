@@ -32,8 +32,7 @@ jobs:
           npx vercel@53 deploy \
             --prod \
             --yes \
-            --token $VERCEL_TOKEN \
-            --name speakup-web
+            --token $VERCEL_TOKEN
 
   deploy-server:
     runs-on: ubuntu-latest
