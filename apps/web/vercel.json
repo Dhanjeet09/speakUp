@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "npm install",
-  "buildCommand": "npx turbo build --scope=@speakup/web --include-dependencies",
+  "buildCommand": "npx turbo clean && npx turbo build --filter=@speakup/web...",
   "outputDirectory": ".next",
   "devCommand": "next dev --port 3000",
   "git": {

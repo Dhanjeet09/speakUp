@@ -113,7 +113,7 @@ export function disconnectSocket() {
 
 function emitSafe<E extends keyof ClientToServerEvents>(
   event: E,
-  payload: Parameters<ClientToServerEvents[E]>[0]
+  ...payload: Parameters<ClientToServerEvents[E]>
 ) {
   if (!socket?.connected) {
     console.warn(`Cannot emit ${String(event)}. Socket disconnected`);
@@ -121,7 +121,7 @@ function emitSafe<E extends keyof ClientToServerEvents>(
     return false;
   }
 
-  socket.emit(event, payload);
+  socket.emit(event, ...payload);
 
   return true;
 }
