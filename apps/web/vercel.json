@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "installCommand": "npm install",
-  "buildCommand": "npx turbo clean && npx turbo build --filter=@speakup/web...",
+  "installCommand": "cd .. && npm install",
+  "buildCommand": "npm run build",
   "outputDirectory": ".next",
   "devCommand": "next dev --port 3000",
   "git": {
