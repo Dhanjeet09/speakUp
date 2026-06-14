@@ -19,20 +19,21 @@ jobs:
           node-version: 20
 
       - name: Deploy SpeakUp Web
-        working-directory: apps/web
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
         run: |
+          # Create project.json at the REPO ROOT so Vercel CLI finds it from CWD.
+          # Do NOT pass a path argument — the Vercel dashboard already has
+          # Root Directory = apps/web. Passing apps/web as an arg causes a
+          # double-path error (apps/web/apps/web).
           mkdir -p .vercel
-
           echo "{\"projectId\":\"$VERCEL_PROJECT_ID\",\"orgId\":\"$VERCEL_ORG_ID\"}" > .vercel/project.json
-
           npx vercel@53 deploy \
             --prod \
             --yes \
-            --token $VERCEL_TOKEN
+            --token "$VERCEL_TOKEN"
 
   deploy-server:
     runs-on: ubuntu-latest
