@@ -8,8 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 20
+              node-version: 20
       - name: Deploy to Vercel
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -20,6 +19,7 @@ jobs:
           echo "{\"projectId\":\"$VERCEL_PROJECT_ID\",\"orgId\":\"$VERCEL_ORG_ID\"}" > .vercel/project.json
           npx vercel@53 deploy --prod --yes --token $VERCEL_TOKEN
         working-directory: apps/web
+-args: --prod
   deploy-server:
     runs-on: ubuntu-latest
     steps:
