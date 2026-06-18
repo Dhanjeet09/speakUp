@@ -8,7 +8,8 @@ import { useMatchStore } from "@/store/useMatchStore";
 import { useCallStore } from "@/store/useCallStore";
 import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
 import { getTodaysTopic } from "@/lib/topics";
-import { createSession } from "@/lib/api/sessions";
+import { createSession, getSessions } from "@/lib/api/sessions";
+import { patch as apiPatch } from "@/lib/api/client";
 import Navbar from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -346,15 +347,18 @@ export default function MatchPage() {
   async function handleRating(positive: boolean) {
     let sessionId = sessionIdRef.current;
 
-    if (!sessionId) {
+    if (!sessionId && user) {
       try {
-        const { get } = await import("@/lib/api/client");
-        const sessions = await get<{ sessions: Array<{ id: string }> }>(
-          `/api/sessions?user1Id=${user?.id}&user2Id=${partnerUserId}`
-        );
-        if (sessions?.sessions?.length > 0) {
-          sessionId = sessions.sessions[0].id;
-          sessionIdRef.current = sessionId;
+        // Fallback: fetch recent sessions for the current user and find matching one
+        const sessionsRes = await getSessions(user.id, 5);
+        if (sessionsRes?.sessions) {
+          const match = sessionsRes.sessions.find(
+            (s) => s.user1Id === partnerUserId || s.user2Id === partnerUserId
+          );
+          if (match) {
+            sessionId = match.id;
+            sessionIdRef.current = match.id;
+          }
         }
       } catch {
       }
@@ -367,8 +371,7 @@ export default function MatchPage() {
     }
 
     try {
-      const { patch } = await import("@/lib/api/client");
-      await patch(`/api/sessions/${sessionId}/rate`, { positive });
+      await apiPatch(`/api/sessions/${sessionId}/rate`, { positive });
     } catch {
       toast.error("Could not save rating");
     }

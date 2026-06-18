@@ -231,7 +231,8 @@ router.post(
     });
     if (!friendship) throw new AppError("Can only send messages to friends", 403);
 
-    const sanitized = sanitizeHtml(content, { allowedTags: [], allowedAttributes: {} });
+    // FIX BUG-005: Limit message content length consistently with socket handler (index.ts line 310)
+    const sanitized = sanitizeHtml(content, { allowedTags: [], allowedAttributes: {} }).slice(0, 1000);
 
     const message = await prisma.chatMessage.create({
       data: {

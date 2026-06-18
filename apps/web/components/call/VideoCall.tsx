@@ -114,6 +114,9 @@ export default function VideoCall({
                   return;
                 }
 
+                // FIX BUG-003: Track error listener per attempt to clean up on timeout/unmount
+                let currentErrorHandler: ((err: any) => void) | null = null;
+
                 const remoteStream = await (async function attemptCall(
                   attempt: number
                 ): Promise<MediaStream> {
@@ -123,10 +126,21 @@ export default function VideoCall({
                       return;
                     }
                     let resolved = false;
+
+                    // Clean up the previous attempt's error listener before creating a new one
+                    if (currentErrorHandler) {
+                      p.off("error", currentErrorHandler);
+                    }
+
                     const callTimeout = setTimeout(() => {
                       if (!resolved) {
                         resolved = true;
                         if (attempt < 3) {
+                          // Clean up this attempt's error listener before retrying
+                          if (currentErrorHandler) {
+                            p.off("error", currentErrorHandler);
+                            currentErrorHandler = null;
+                          }
                           setTimeout(
                             () => {
                               if (!mountedRef.current) return;
@@ -141,10 +155,11 @@ export default function VideoCall({
                     }, 20000);
 
                     const onPeerError = (err: any) => {
+                      currentErrorHandler = null; // once fired, no need to clean up
                       if (!resolved) {
                         resolved = true;
+                        clearTimeout(callTimeout);
                         if (attempt < 3) {
-                          clearTimeout(callTimeout);
                           setTimeout(
                             () => {
                               if (!mountedRef.current) return;
@@ -153,12 +168,12 @@ export default function VideoCall({
                             1000
                           );
                         } else {
-                          clearTimeout(callTimeout);
                           reject(mapPeerError(err));
                         }
                       }
                     };
 
+                    currentErrorHandler = onPeerError;
                     p.once("error", onPeerError);
 
                     try {
@@ -166,14 +181,24 @@ export default function VideoCall({
                         if (!resolved) {
                           resolved = true;
                           clearTimeout(callTimeout);
+                          // Clean up error listener on success
+                          if (currentErrorHandler) {
+                            p.off("error", currentErrorHandler);
+                            currentErrorHandler = null;
+                          }
                           resolve(remote);
                         }
                       });
                     } catch (callErr) {
                       if (!resolved) {
                         resolved = true;
+                        clearTimeout(callTimeout);
+                        // Clean up error listener on sync error
+                        if (currentErrorHandler) {
+                          p.off("error", currentErrorHandler);
+                          currentErrorHandler = null;
+                        }
                         if (attempt < 3) {
-                          clearTimeout(callTimeout);
                           setTimeout(
                             () => {
                               if (!mountedRef.current) return;
@@ -182,7 +207,6 @@ export default function VideoCall({
                             1000
                           );
                         } else {
-                          clearTimeout(callTimeout);
                           reject(callErr);
                         }
                       }
@@ -390,7 +414,7 @@ export default function VideoCall({
           <div
             className={`relative aspect-video w-full overflow-hidden rounded-card bg-black transition-shadow duration-200 ${
               remoteSpeaking
-                ? "animate-pulse shadow-[0_0_0_4px_rgba(29,158,117,0.3)] ring-2 ring-[#1D9E75] ring-offset-4"
+                ? "motion-safe:animate-pulse shadow-[0_0_0_4px_rgba(29,158,117,0.3)] ring-2 ring-[#1D9E75] ring-offset-4"
                 : ""
             }`}
           >

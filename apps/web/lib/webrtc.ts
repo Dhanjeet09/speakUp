@@ -185,12 +185,30 @@ export function releaseLocalStream(): void {
   }
 }
 
+// Shared AudioContext to avoid hitting browser's limit on concurrent instances
+let sharedAudioContext: AudioContext | null = null;
+
+function getSharedAudioContext(): AudioContext {
+  if (!sharedAudioContext || sharedAudioContext.state === "closed") {
+    sharedAudioContext = new AudioContext();
+  }
+  return sharedAudioContext;
+}
+
+/** Release the shared AudioContext when no longer needed anywhere */
+export function releaseSharedAudioContext(): void {
+  if (sharedAudioContext && sharedAudioContext.state !== "closed") {
+    sharedAudioContext.close();
+  }
+  sharedAudioContext = null;
+}
+
 export function startSpeakingDetection(
   stream: MediaStream,
   onSpeaking: (speaking: boolean) => void
 ): () => void {
   try {
-    const context = new AudioContext();
+    const context = getSharedAudioContext();
     const analyser = context.createAnalyser();
     analyser.fftSize = 256;
     const source = context.createMediaStreamSource(stream);
@@ -212,7 +230,8 @@ export function startSpeakingDetection(
 
     return () => {
       clearInterval(interval);
-      context.close();
+      // Disconnect the source to release resources without closing shared context
+      source.disconnect();
     };
   } catch {
     return () => {};
@@ -224,7 +243,7 @@ export function startMicLevelDetection(
   onLevel: (level: number) => void
 ): () => void {
   try {
-    const context = new AudioContext();
+    const context = getSharedAudioContext();
     const analyser = context.createAnalyser();
     analyser.fftSize = 256;
     const source = context.createMediaStreamSource(stream);
@@ -239,7 +258,8 @@ export function startMicLevelDetection(
 
     return () => {
       clearInterval(interval);
-      context.close();
+      // Disconnect the source to release resources without closing shared context
+      source.disconnect();
     };
   } catch {
     return () => {};
